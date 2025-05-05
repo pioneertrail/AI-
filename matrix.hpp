@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstddef> // For size_t
 #include <iosfwd> // Forward declaration for std::ostream
+#include <fstream> // For file I/O
 
 class Matrix {
 public:
@@ -20,11 +21,30 @@ public:
     // Element access (const)
     const double& operator()(size_t row, size_t col) const;
 
+    // Fill the matrix with a specific value
+    void fill(double value);
+
+    // --- Save/Load ---
+    void saveToFile(std::ofstream& file) const;
+    static Matrix loadFromFile(std::ifstream& file); // Static factory method
+
     // Matrix multiplication
     Matrix operator*(const Matrix& other) const;
 
     // Matrix addition
     Matrix operator+(const Matrix& other) const;
+
+    // Matrix subtraction
+    Matrix operator-(const Matrix& other) const;
+
+    // Scalar multiplication
+    Matrix operator*(double scalar) const;
+
+    // Transpose
+    Matrix transpose() const;
+
+    // Element-wise multiplication (Hadamard product)
+    Matrix elementwiseMultiply(const Matrix& other) const;
 
 private:
     size_t rows_;
@@ -34,5 +54,8 @@ private:
 
 // Helper function to print matrix contents
 void printMatrix(const Matrix& mat, std::ostream& os);
+
+// Friend function for scalar * Matrix
+Matrix operator*(double scalar, const Matrix& mat);
 
 #endif // MATRIX_HPP 

@@ -3,7 +3,7 @@ call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build
 echo Visual Studio environment has been set up.
 
 REM Compile the main project source files
-set SOURCES=main.cpp matrix.cpp
+set SOURCES=main.cpp matrix.cpp perceptron_layer.cpp activation.cpp neural_network.cpp loss.cpp optimizer.cpp game.cpp
 set OUTPUT_NAME=ml_app.exe
 
 echo Compiling %SOURCES%...
@@ -14,7 +14,8 @@ if %ERRORLEVEL% EQU 0 (
     echo Compilation successful! Executable: %OUTPUT_NAME%
     echo Running program:
     echo.
-    %OUTPUT_NAME%
+    REM Run the training mode after successful compilation
+    %OUTPUT_NAME% train 
 ) else (
     echo Compilation failed with error code %ERRORLEVEL%
 ) 

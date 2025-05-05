@@ -4,6 +4,8 @@
 #include <cassert>   // Including assert as well, though std::out_of_range is used
 #include <iostream>  // For std::cout, std::endl
 #include <iomanip>   // For std::setw, std::fixed, std::setprecision
+#include <algorithm> // For std::fill
+#include <fstream>   // For file I/O
 
 // Constructor Implementation
 Matrix::Matrix(size_t rows, size_t cols)
@@ -39,6 +41,11 @@ const double& Matrix::operator()(size_t row, size_t col) const {
     }
     // Row-major storage: index = row * num_cols + col
     return data_[row * cols_ + col];
+}
+
+// Fill implementation
+void Matrix::fill(double value) {
+    std::fill(data_.begin(), data_.end(), value);
 }
 
 // Matrix Multiplication Implementation
@@ -90,6 +97,69 @@ Matrix Matrix::operator+(const Matrix& other) const {
     return result;
 }
 
+// Matrix Subtraction Implementation
+Matrix Matrix::operator-(const Matrix& other) const {
+    // Dimensions must match exactly
+    if (rows_ != other.getRows() || cols_ != other.getCols()) {
+        throw std::invalid_argument("Matrix dimensions must match for subtraction.");
+    }
+
+    Matrix result(rows_, cols_);
+    for (size_t i = 0; i < rows_; ++i) {
+        for (size_t j = 0; j < cols_; ++j) {
+            result(i, j) = (*this)(i, j) - other(i, j);
+        }
+    }
+    return result;
+}
+
+// Transpose Implementation
+Matrix Matrix::transpose() const {
+    // Result matrix dimensions are swapped: cols x rows
+    Matrix result(cols_, rows_);
+
+    for (size_t i = 0; i < rows_; ++i) {
+        for (size_t j = 0; j < cols_; ++j) {
+            result(j, i) = (*this)(i, j); // Swap indices
+        }
+    }
+
+    return result;
+}
+
+// Element-wise Multiplication (Hadamard Product) Implementation
+Matrix Matrix::elementwiseMultiply(const Matrix& other) const {
+    // Dimensions must match exactly
+    if (rows_ != other.getRows() || cols_ != other.getCols()) {
+        throw std::invalid_argument("Matrix dimensions must match for element-wise multiplication.");
+    }
+
+    Matrix result(rows_, cols_);
+    for (size_t i = 0; i < rows_; ++i) {
+        for (size_t j = 0; j < cols_; ++j) {
+            result(i, j) = (*this)(i, j) * other(i, j);
+        }
+    }
+    return result;
+}
+
+// Scalar Multiplication Implementation (Matrix * scalar)
+Matrix Matrix::operator*(double scalar) const {
+    Matrix result(rows_, cols_);
+    for (size_t i = 0; i < rows_; ++i) {
+        for (size_t j = 0; j < cols_; ++j) {
+            result(i, j) = (*this)(i, j) * scalar;
+        }
+    }
+    return result;
+}
+
+// Scalar Multiplication Implementation (scalar * Matrix)
+Matrix operator*(double scalar, const Matrix& mat) {
+    // Reuse the member function implementation
+    return mat * scalar;
+}
+
 // Helper function to print matrix contents
 void printMatrix(const Matrix& mat, std::ostream& os) {
     os << std::fixed << std::setprecision(2); // Format output
@@ -101,4 +171,47 @@ void printMatrix(const Matrix& mat, std::ostream& os) {
         }
         os << "]\n";
     }
+}
+
+// --- Save/Load Implementation ---
+
+void Matrix::saveToFile(std::ofstream& file) const {
+    if (!file.is_open()) {
+        throw std::runtime_error("Output file stream is not open for writing.");
+    }
+    // Write dimensions (rows, cols)
+    file.write(reinterpret_cast<const char*>(&rows_), sizeof(rows_));
+    file.write(reinterpret_cast<const char*>(&cols_), sizeof(cols_));
+    // Write data elements
+    file.write(reinterpret_cast<const char*>(data_.data()), data_.size() * sizeof(double));
+
+    if (!file) { // Check for write errors
+         throw std::runtime_error("Error writing matrix data to file.");
+    }
+}
+
+Matrix Matrix::loadFromFile(std::ifstream& file) {
+    if (!file.is_open()) {
+        throw std::runtime_error("Input file stream is not open for reading.");
+    }
+    size_t rows = 0, cols = 0;
+    // Read dimensions
+    file.read(reinterpret_cast<char*>(&rows), sizeof(rows));
+    file.read(reinterpret_cast<char*>(&cols), sizeof(cols));
+
+    if (!file || rows == 0 || cols == 0) { // Check for read errors or invalid dimensions
+         throw std::runtime_error("Error reading matrix dimensions from file or dimensions are invalid.");
+    }
+
+    // Create matrix with read dimensions (allocates data_ vector)
+    Matrix loadedMatrix(rows, cols);
+
+    // Read data elements directly into the vector
+    file.read(reinterpret_cast<char*>(loadedMatrix.data_.data()), rows * cols * sizeof(double));
+
+    if (!file) { // Check for read errors after reading data
+         throw std::runtime_error("Error reading matrix data from file.");
+    }
+
+    return loadedMatrix;
 } 
