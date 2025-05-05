@@ -1,0 +1,11 @@
+# Build artifacts
+*.exe
+*.obj
+*.ilk
+*.pdb
+
+# VS Code specific
+.vscode/
+
+# Build directory (if using CMake later)
+build/ 
