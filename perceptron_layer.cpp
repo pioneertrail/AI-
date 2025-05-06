@@ -7,41 +7,44 @@
 #include <memory>    // For std::move
 #include <utility>   // For std::move
 #include <fstream>   // For file I/O
+#include <vector>    // Used indirectly by Matrix
+#include <cmath>     // For tanh, exp, sqrt? Maybe not needed directly
+#include <cstdlib>   // For rand() and srand() -> Will replace
+#include <ctime>     // For time() -> Will replace
+#include <iostream>  // Debug
 
 // Constructor: Initialize weights, biases, and activation function
-PerceptronLayer::PerceptronLayer(size_t input_size, size_t output_size, std::unique_ptr<ActivationFunction> activationFunc)
-    : weights_(input_size, output_size),                 // Initialize weights first
-      biases_(1, output_size),                       // Initialize biases next
-      activationFunc_(std::move(activationFunc)),      // Then activation func
-      inputs_(1, 1),  // Initialize to minimal valid size
-      z_(1, 1),       // Initialize to minimal valid size
-      weights_gradient_(input_size, output_size),      // Init weights_gradient using sizes
-      biases_gradient_(1, output_size)                 // Init biases_gradient using sizes
+PerceptronLayer::PerceptronLayer(size_t input_size, size_t output_size, 
+                                 std::unique_ptr<ActivationFunction> activationFunc, 
+                                 std::mt19937& rng)
+    : weights_(input_size, output_size),                 
+      biases_(1, output_size),                       
+      activationFunc_(std::move(activationFunc)),      
+      inputs_(1, 1), 
+      z_(1, 1),       
+      weights_gradient_(input_size, output_size),      
+      biases_gradient_(1, output_size)                 
 {
     if (!activationFunc_) {
          throw std::invalid_argument("Activation function cannot be null.");
     }
-    // Seed the random number generator
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::default_random_engine generator(seed);
 
-    // Use a uniform distribution for small random weights/biases
-    // Range can be adjusted, e.g., based on Xavier/He initialization if needed later
-    std::uniform_real_distribution<double> distribution(-0.5, 0.5);
+    // Initialize weights randomly using passed RNG
+    // Common initialization: scaled random values (e.g., Xavier/Glorot)
+    // Simple version: Uniform distribution scaled by sqrt(1.0 / input_size)
+    double scale = std::sqrt(1.0 / static_cast<double>(input_size));
+    std::uniform_real_distribution<double> dist(-scale, scale);
 
-    // Initialize weights
-    for (size_t i = 0; i < weights_.getRows(); ++i) {
-        for (size_t j = 0; j < weights_.getCols(); ++j) {
-            weights_(i, j) = distribution(generator);
+    for (size_t i = 0; i < input_size; ++i) {
+        for (size_t j = 0; j < output_size; ++j) {
+            weights_(i, j) = dist(rng); // Use the passed RNG
         }
     }
 
-    // Initialize biases (often initialized to zero or small value)
-    biases_.fill(0.0); // Explicitly zero biases
-
-    // Gradient matrices are already initialized (to zero) by their constructor via initializer list
-    // weights_gradient_ = Matrix(input_size, output_size);
-    // biases_gradient_ = Matrix(1, output_size);
+    // Initialize biases to zero (already done by Matrix constructor, but explicit is fine)
+    biases_.fill(0.0);
+    
+    // Gradients are initialized to zero by Matrix constructor
 }
 
 // Forward pass implementation

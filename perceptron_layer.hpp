@@ -7,6 +7,7 @@
 #include <memory>  // For std::unique_ptr
 #include <optional> // To store intermediate values potentially
 #include <fstream> // For file I/O
+#include <random>  // Include for std::mt19937
 
 class PerceptronLayer {
 public:
@@ -16,8 +17,9 @@ public:
      * @param input_size The number of input features.
      * @param output_size The number of output features (neurons).
      * @param activationFunc A unique_ptr to the activation function for this layer.
+     * @param rng A reference to the random number generator for weight initialization.
      */
-    PerceptronLayer(size_t input_size, size_t output_size, std::unique_ptr<ActivationFunction> activationFunc);
+    PerceptronLayer(size_t input_size, size_t output_size, std::unique_ptr<ActivationFunction> activationFunc, std::mt19937& rng);
 
     /**
      * @brief Performs the forward pass: output = activation(inputs * weights + bias)

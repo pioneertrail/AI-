@@ -1,201 +1,256 @@
 #include <iostream>
 #include "matrix.hpp"
-#include "perceptron_layer.hpp" // Include the new layer header
-#include "activation.hpp"       // Include the activation header
-#include "neural_network.hpp"   // Include the Neural Network header
-#include "loss.hpp"             // Include the Loss header
-#include "optimizer.hpp"        // Include the Optimizer header
-#include <stdexcept> // For exception handling
-#include <memory>    // For std::make_unique
-#include <vector>    // For std::vector used in loss example
-#include <iomanip>   // For std::setw and std::setprecision
-#include <cstdlib>   // For rand(), srand()
-#include <ctime>     // For time() to seed srand()
-#include "game.hpp"     // Include the Game header
-#include <cmath> // For std::abs
-#include <numeric> // For std::iota
-#include <random>  // For std::mt19937 and std::shuffle
-#include <algorithm> // For std::shuffle
+#include "perceptron_layer.hpp"
+#include "activation.hpp"
+#include "neural_network.hpp"
+#include "loss.hpp"
+#include "optimizer.hpp"
+#include <stdexcept> 
+#include <memory>   
+#include <vector>   
+#include <iomanip>  
+#include <cstdlib>  
+#include <ctime>    
+#include "game.hpp"    
+#include <cmath> 
+#include <numeric> 
+#include <random>  
+#include <algorithm> 
+#include <limits> 
+#include <cstdio> 
 
-// Forward declaration for the helper function
-int calculateIdealMove(Vec2 player_pos, Vec2 enemy_pos, Vec2 target_pos, int grid_width, int grid_height);
+// Forward declaration for the training function
+void trainInterceptorModel(const std::string& model_filename, std::mt19937& rng, int max_epochs = 3000); 
 
-// --- Function to Train the Dodger AI Model ---
-void trainDodgerModel(const std::string& model_filename, int epochs = 3000) {
-    std::cout << "Training Dodger AI model...\n";
+// --- Function to Train the Interceptor AI Model ---
+void trainInterceptorModel(const std::string& model_filename, std::mt19937& rng, int max_epochs) {
+    std::cout << "Training Interceptor AI model (max " << max_epochs << " epochs)..." << std::endl;
+
+    // --- Simulation/Game Constants (mirroring Game class for data generation) ---
+    const double time_step = 0.1; // s
+    const double max_accel = 5.0; // units/s^2
+    const double world_w = 100.0;
+    const double world_h = 100.0;
+    const double missile_speed_train = 20.0; // units/s
+    const double velocity_scale_train = 50.0; // Factor to scale velocity inputs
 
     // --- Network Configuration ---
-    const int input_size = 4; // player_x, player_y, enemy_x, enemy_y (normalized)
-    const int hidden_size = 16; // Increased hidden size slightly
-    const int output_size = 5; // Moves: Stay, Left, Right, Up, Down
+    const int input_size = 4;  // rel_missile_x, rel_missile_y, missile_vx, missile_vy (scaled)
+    const int hidden_size = 64; // Single hidden layer size
+    const int output_size = 2; // accel_x, accel_y
     const double learning_rate = 0.01;
-    const int grid_width = 20; // Must match Game settings
-    const int grid_height = 10; // Must match Game settings
 
-    // Create the optimizer first
+    // Create the optimizer
     auto optimizer = std::make_unique<SGD>(learning_rate);
-    // Pass the optimizer to the NeuralNetwork constructor
-    NeuralNetwork nn(std::move(optimizer)); 
+    NeuralNetwork nn(std::move(optimizer), rng);
+
+    // Add layers: Input -> ReLU(Hidden) -> Linear(Output)
+    nn.addLayer(input_size, hidden_size, std::make_unique<ReLU>());     
+    nn.addLayer(hidden_size, output_size, std::make_unique<Linear>()); // Output desired acceleration
+
+    // --- Training Data Generation --- 
+    const int num_total_samples = 10000; // Increased sample count
+    Matrix all_inputs(num_total_samples, input_size);
+    Matrix all_targets(num_total_samples, output_size);
+
+    // Distributions for random initial states
+    std::uniform_real_distribution<double> pos_x_dist(0.0, world_w);
+    std::uniform_real_distribution<double> pos_y_dist(0.0, world_h);
+    // Keep interceptor velocity 0 for simplicity in ideal calculation for now
+    // std::uniform_real_distribution<double> vel_comp_dist(-5.0, 5.0); // If randomizing interceptor velocity later
+
+    for (int i = 0; i < num_total_samples; ++i) {
+        // --- Generate Random State ---
+        Vec2 interceptor_pos{pos_x_dist(rng), pos_y_dist(rng)};
+        Vec2 interceptor_vel{0.0, 0.0}; // Start stationary for easier target calculation
+        
+        Vec2 missile_pos{0.0, 0.0};
+        Vec2 missile_target{0.0, 0.0};
+        double dx_init, dy_init; // Declare variables outside the loop
+        // Ensure missile and target aren't too close initially
+        do { 
+            missile_pos.x = pos_x_dist(rng);
+            missile_pos.y = pos_y_dist(rng);
+            missile_target.x = pos_x_dist(rng);
+            missile_target.y = pos_y_dist(rng);
+            dx_init = missile_pos.x - interceptor_pos.x;
+            dy_init = missile_pos.y - interceptor_pos.y;
+        } while (std::sqrt(dx_init*dx_init + dy_init*dy_init) < 10.0); // Ensure min starting distance
+
+        Vec2 missile_vel{0.0, 0.0};
+        double dx_m = missile_target.x - missile_pos.x;
+        double dy_m = missile_target.y - missile_pos.y;
+        double mag_m = std::sqrt(dx_m * dx_m + dy_m * dy_m);
+        if (mag_m > 1e-6) {
+            missile_vel.x = (dx_m / mag_m) * missile_speed_train;
+            missile_vel.y = (dy_m / mag_m) * missile_speed_train;
+        } else {
+            // Random velocity if target is same as start
+            double angle = std::uniform_real_distribution<double>(0, 2 * 3.1415926535)(rng);
+            missile_vel.x = std::cos(angle) * missile_speed_train;
+            missile_vel.y = std::sin(angle) * missile_speed_train;
+        }
+
+        // --- Calculate NN Inputs ---
+        double rel_missile_x = missile_pos.x - interceptor_pos.x;
+        double rel_missile_y = missile_pos.y - interceptor_pos.y;
+        // Scale/Normalize inputs
+        all_inputs(i, 0) = rel_missile_x / world_w; // Scale relative position by world size
+        all_inputs(i, 1) = rel_missile_y / world_h;
+        all_inputs(i, 2) = missile_vel.x / velocity_scale_train; // Scale velocity by arbitrary factor
+        all_inputs(i, 3) = missile_vel.y / velocity_scale_train;
+
+        // --- Calculate Ideal Target Acceleration (Direct Targeting) ---
+        double delta_t = time_step; // Prediction timestep
+        Vec2 missile_pos_future{0.0, 0.0};
+        missile_pos_future.x = missile_pos.x + missile_vel.x * delta_t;
+        missile_pos_future.y = missile_pos.y + missile_vel.y * delta_t;
+        
+        Vec2 required_disp{0.0, 0.0};
+        required_disp.x = missile_pos_future.x - interceptor_pos.x;
+        required_disp.y = missile_pos_future.y - interceptor_pos.y;
+        
+        // From Delta_P = V0*t + 0.5*A*t^2  => A = 2 * (Delta_P - V0*t) / t^2
+        Vec2 ideal_accel{0.0, 0.0};
+        if (delta_t > 1e-6) { 
+             ideal_accel.x = 2.0 * (required_disp.x - interceptor_vel.x * delta_t) / (delta_t * delta_t);
+             ideal_accel.y = 2.0 * (required_disp.y - interceptor_vel.y * delta_t) / (delta_t * delta_t);
+        } else {
+             ideal_accel.x = 0.0;
+             ideal_accel.y = 0.0; // Avoid division by zero
+        }
+
+        // Clamp acceleration to maximum allowed
+        ideal_accel.x = std::max<double>(-max_accel, std::min<double>(ideal_accel.x, max_accel));
+        ideal_accel.y = std::max<double>(-max_accel, std::min<double>(ideal_accel.y, max_accel));
+
+        // --- Store Target Outputs ---
+        all_targets(i, 0) = ideal_accel.x;
+        all_targets(i, 1) = ideal_accel.y;
+    }
+
+    // --- Data Splitting (Train/Validation) --- 
+    const double validation_split_ratio = 0.20; 
+    const int num_validation_samples = static_cast<int>(num_total_samples * validation_split_ratio);
+    const int num_train_samples = num_total_samples - num_validation_samples;
     
-    // Add layers using the configuration method
-    nn.addLayer(input_size, hidden_size, std::make_unique<ReLU>());
-    nn.addLayer(hidden_size, output_size, std::make_unique<Sigmoid>()); // Sigmoid output
-
-    // --- Training Data Generation ---
-    const int num_samples = 5000;
-    Matrix inputs(num_samples, input_size);
-    Matrix targets(num_samples, output_size);
-
-    srand(time(0)); // Seed for data generation
-
-    for (int i = 0; i < num_samples; ++i) {
-        // Random positions for player and enemy
-        Vec2 player_pos = {rand() % grid_width, rand() % grid_height};
-        Vec2 enemy_pos;
-        do { // Ensure enemy doesn't start on player
-           enemy_pos = {rand() % grid_width, rand() % grid_height};
-        } while (enemy_pos == player_pos);
-        Vec2 target_pos = {grid_width - 1, grid_height / 2}; // Fixed target position
-
-        // Normalize inputs
-        inputs(i, 0) = static_cast<double>(player_pos.x) / grid_width;
-        inputs(i, 1) = static_cast<double>(player_pos.y) / grid_height;
-        inputs(i, 2) = static_cast<double>(enemy_pos.x) / grid_width;
-        inputs(i, 3) = static_cast<double>(enemy_pos.y) / grid_height;
-
-        // Calculate ideal move
-        int ideal_move_code = calculateIdealMove(player_pos, enemy_pos, target_pos, grid_width, grid_height);
-
-        // Create one-hot encoded target vector
-        for (int j = 0; j < output_size; ++j) {
-            targets(i, j) = (j == ideal_move_code) ? 1.0 : 0.0;
-        }
+    std::vector<int> indices(num_total_samples);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::shuffle(indices.begin(), indices.end(), rng);
+    Matrix train_inputs(num_train_samples, input_size);
+    Matrix train_targets(num_train_samples, output_size);
+    Matrix val_inputs(num_validation_samples, input_size);
+    Matrix val_targets(num_validation_samples, output_size);
+    
+    for (int i = 0; i < num_train_samples; ++i) {
+        int original_idx = indices[i];
+        for (int j = 0; j < input_size; ++j) train_inputs(i, j) = all_inputs(original_idx, j);
+        for (int j = 0; j < output_size; ++j) train_targets(i, j) = all_targets(original_idx, j);
+    }
+    
+    for (int i = 0; i < num_validation_samples; ++i) {
+        int original_idx = indices[num_train_samples + i]; 
+        for (int j = 0; j < input_size; ++j) val_inputs(i, j) = all_inputs(original_idx, j);
+        for (int j = 0; j < output_size; ++j) val_targets(i, j) = all_targets(original_idx, j);
     }
 
-    // --- Training Loop ---
+    // --- Training Loop with Early Stopping --- 
     std::unique_ptr<LossFunction> loss_func = std::make_unique<MeanSquaredError>();
-    const int batch_size = 32;
-    int num_batches = num_samples / batch_size;
+    const int batch_size = 64; // Increased batch size slightly
+    const int patience = 50; 
+    const std::string best_model_temp_file = model_filename + ".best_temp";
+    double best_val_loss = std::numeric_limits<double>::max();
+    int epochs_no_improve = 0;
+    int best_epoch = -1;
+    
+    std::cout << "Starting training (" << num_train_samples << " train, " << num_validation_samples << " val samples)." << std::endl;
+    
+    for (int e = 0; e < max_epochs; ++e) {
+        double total_epoch_loss = 0.0;
+        int batches_processed = 0;
+        std::vector<int> train_indices(num_train_samples);
+        std::iota(train_indices.begin(), train_indices.end(), 0);
+        std::shuffle(train_indices.begin(), train_indices.end(), rng);
+        
+        for (size_t i = 0; i < static_cast<size_t>(num_train_samples); i += batch_size) {
+            size_t current_batch_size = std::min<size_t>(static_cast<size_t>(batch_size), static_cast<size_t>(num_train_samples) - i);
+            if (current_batch_size == 0) continue;
+            
+            Matrix batch_inputs(static_cast<int>(current_batch_size), input_size);
+            Matrix batch_targets(static_cast<int>(current_batch_size), output_size);
+            
+            for (size_t k = 0; k < current_batch_size; ++k) {
+                int sample_idx = train_indices[i + k];
+                for(int j=0; j<input_size; ++j) batch_inputs(static_cast<int>(k), j) = train_inputs(sample_idx, j);
+                for(int j=0; j<output_size; ++j) batch_targets(static_cast<int>(k), j) = train_targets(sample_idx, j);
+            }
+            
+            total_epoch_loss += nn.train(batch_inputs, batch_targets, *loss_func);
+            batches_processed++;
+        }
+        
+        double avg_train_loss = (batches_processed > 0) ? (total_epoch_loss / batches_processed) : 0.0;
+        Matrix val_output = nn.forward(val_inputs);
+        double current_val_loss = loss_func->calculate(val_output, val_targets);
+        
+        if ((e + 1) % 100 == 0) { 
+             std::cout << "Epoch [" << (e + 1) << "/" << max_epochs 
+                       << "], Train Loss: " << avg_train_loss 
+                       << ", Val Loss: " << current_val_loss << std::endl;
+        }
+        
+        if (current_val_loss < best_val_loss) {
+            best_val_loss = current_val_loss;
+            epochs_no_improve = 0;
+            best_epoch = e + 1;
+            nn.saveModel(best_model_temp_file);
+        } else {
+            epochs_no_improve++;
+        }
+        
+        if (epochs_no_improve >= patience) {
+            std::cout << "\nEarly stopping triggered after " << e + 1 << " epochs." << std::endl;
+            std::cout << "Best validation loss " << best_val_loss << " achieved at epoch " << best_epoch << "." << std::endl;
+            break; 
+        }
+    }
+    
+    if (best_epoch != -1 && best_epoch < (max_epochs)) {
+        std::cout << "Loading best model from epoch " << best_epoch << " (Val Loss: " << best_val_loss << ")" << std::endl;
+        try {
+             auto final_optimizer = std::make_unique<SGD>(learning_rate); 
+             NeuralNetwork best_nn(std::move(final_optimizer), rng);
+             best_nn.loadModel(best_model_temp_file);
+             best_nn.saveModel(model_filename);
+             std::cout << "Best model loaded and saved to " << model_filename << std::endl;
+        } catch (const std::exception& e) {
+             std::cerr << "Error loading/saving best model: " << e.what() << std::endl;
+             std::cerr << "Saving model from the last epoch instead." << std::endl;
+             nn.saveModel(model_filename); 
+        }
+    } else {
+         std::cout << "Training completed " << max_epochs << " epochs." << std::endl;
+         if(best_epoch != -1) {
+            std::cout << "Best validation loss " << best_val_loss << " achieved at epoch " << best_epoch << "." << std::endl;
+         } else {
+            std::cout << "No improvement in validation loss observed. Saving model from final epoch." << std::endl;
+         }
+         nn.saveModel(model_filename);
+         std::cout << "Model saved to " << model_filename << std::endl;
+    }
+    
+    std::remove(best_model_temp_file.c_str());
+    std::cout << "Temporary best model file deleted." << std::endl;
+    std::cout << "Training function finished." << std::endl;
+}
 
-    std::cout << "Starting training for " << epochs << " epochs." << std::endl;
-    // Set up random number generator for shuffling
+// Removed old calculateIdealMove function
+
+int main(int argc, char *argv[]) {
     std::random_device rd;
-    std::mt19937 g(rd());
+    std::mt19937 main_rng(rd());
 
-    for (int e = 0; e < epochs; ++e) {
-        double epoch_loss = 0.0;
-        // Simple shuffling logic (shuffle indices)
-        std::vector<int> indices(num_samples);
-        std::iota(indices.begin(), indices.end(), 0); // Fill with 0, 1, ..., n-1
-        //std::random_shuffle(indices.begin(), indices.end()); // Shuffle -> Removed in C++17
-        std::shuffle(indices.begin(), indices.end(), g); // Use std::shuffle instead
-
-        for (int b = 0; b < num_batches; ++b) {
-            // Create mini-batch
-            Matrix batch_inputs(batch_size, input_size);
-            Matrix batch_targets(batch_size, output_size);
-            for (int k = 0; k < batch_size; ++k) {
-                int sample_idx = indices[b * batch_size + k];
-                for(int j=0; j<input_size; ++j) batch_inputs(k, j) = inputs(sample_idx, j);
-                for(int j=0; j<output_size; ++j) batch_targets(k, j) = targets(sample_idx, j);
-            }
-
-            // Train on batch
-            epoch_loss += nn.train(batch_inputs, batch_targets, *loss_func);
-        }
-
-        if ((e + 1) % 100 == 0) {
-            std::cout << "Epoch [" << (e + 1) << "/" << epochs << "], Loss: " << (epoch_loss / num_batches) << std::endl;
-        }
-    }
-
-    // --- Save Model ---
-    nn.saveModel(model_filename);
-    std::cout << "Training complete. Model saved to " << model_filename << std::endl;
-}
-
-// Helper function to calculate the ideal move code (0-4) for training - Always Chase Player
-int calculateIdealMove(Vec2 player_pos, Vec2 enemy_pos, Vec2 target_pos, int grid_width, int grid_height) {
-    // Calculate squared distances (cheaper than sqrt)
-    // auto distSq = [](Vec2 a, Vec2 b) { ... }; // distSq not needed for this version
-
-    Vec2 goal_pos = player_pos; // Goal is always the Player
-
-    // Calculate vector from enemy to the player
-    int dx_to_goal = goal_pos.x - enemy_pos.x;
-    int dy_to_goal = goal_pos.y - enemy_pos.y;
-
-    // Determine primary move based on largest distance component to goal
-    int desired_move = 0; // Default: Stay
-    if (std::abs(dx_to_goal) > std::abs(dy_to_goal)) {
-        if (dx_to_goal > 0) desired_move = 2; // Right
-        else if (dx_to_goal < 0) desired_move = 1; // Left
-    } else if (std::abs(dy_to_goal) > 0) { // Check dy only if dx is not dominant
-        if (dy_to_goal > 0) desired_move = 4; // Down
-        else if (dy_to_goal < 0) desired_move = 3; // Up
-    } else {
-        // Enemy is already on the goal (player) square 
-        desired_move = 0; 
-    }
-
-    // --- Avoid moving directly onto the player's current square --- 
-    Vec2 enemy_next_pos = enemy_pos;
-    int temp_dx = 0, temp_dy = 0;
-    switch (desired_move) {
-        case 1: temp_dx = -1; break;
-        case 2: temp_dx = 1; break;
-        case 3: temp_dy = -1; break;
-        case 4: temp_dy = 1; break;
-    }
-    enemy_next_pos.x += temp_dx;
-    enemy_next_pos.y += temp_dy;
-
-    if (enemy_next_pos == player_pos && desired_move != 0) { 
-        // Collision predicted! Try a perpendicular move instead.
-        std::vector<int> escape_moves;
-        // Prioritize moves perpendicular to the original desired move direction
-        if (desired_move == 3 || desired_move == 4) { // Was moving vertically, try horizontal
-            escape_moves.push_back(1); // Left
-            escape_moves.push_back(2); // Right
-        } else { // Was moving horizontally (or staying), try vertical
-            escape_moves.push_back(3); // Up
-            escape_moves.push_back(4); // Down
-        }
-        // Add opposite direction and Stay as last resorts
-        if(desired_move == 1) escape_moves.push_back(2); else if(desired_move==2) escape_moves.push_back(1);
-        if(desired_move == 3) escape_moves.push_back(4); else if(desired_move==4) escape_moves.push_back(3);
-        escape_moves.push_back(0); // Stay
-
-        // Find the first valid alternative move that isn't colliding
-        for (int escape_move : escape_moves) {
-            Vec2 escape_pos = enemy_pos;
-            int esc_dx = 0, esc_dy = 0;
-            switch (escape_move) {
-                case 1: esc_dx = -1; break;
-                case 2: esc_dx = 1; break;
-                case 3: esc_dy = -1; break;
-                case 4: esc_dy = 1; break;
-            }
-            escape_pos.x += esc_dx;
-            escape_pos.y += esc_dy;
-
-            // Check bounds and collision with player
-            if (escape_pos.x >= 0 && escape_pos.x < grid_width && 
-                escape_pos.y >= 0 && escape_pos.y < grid_height && 
-                !(escape_pos == player_pos)) 
-            {        
-                 return escape_move; // Found a safe escape move
-            }
-        }
-        return 0; // If all escape moves fail, default to stay
-    } else {
-        // No collision with player predicted, proceed with the desired move towards goal (player)
-        return desired_move;
-    }
-}
-
-int main(int argc, char *argv[]) { // Add argc and argv
-    const std::string model_file = "dodger_model_2d.bin"; 
+    const std::string model_file = "interceptor_model.bin"; // New model filename
 
     bool train_mode = false;
     if (argc > 1) {
@@ -203,21 +258,19 @@ int main(int argc, char *argv[]) { // Add argc and argv
         if (arg1 == "train") {
             train_mode = true;
         }
-        // Could add more arguments here later (e.g., --epochs, --load-model)
     }
 
     if (train_mode) {
-        // --- Training Mode ---
-        std::cout << "--- Running in Training Mode ---" << std::endl;
-        trainDodgerModel(model_file); 
+        std::cout << "--- Running in Training Mode (Interceptor) ---" << std::endl;
+        trainInterceptorModel(model_file, main_rng); // Call the new training function
         std::cout << "Training finished." << std::endl;
     } else {
-        // --- Gameplay Mode ---
-        std::cout << "--- Running in Gameplay Mode --- " << std::endl;
+        std::cout << "--- Running in Gameplay Mode (Interceptor) --- " << std::endl;
         std::cout << "Loading model: " << model_file << std::endl;
         try {
-            Game game(model_file); // Game constructor loads the model
-            game.run();
+            Game game(model_file, main_rng); // Create Game instance with model and RNG
+            game.run(); // Run the game loop
+            std::cout << "Game session completed." << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "Error during game initialization or run: " << e.what() << std::endl;
             std::cerr << "Ensure the model file '" << model_file << "' exists. Run with 'train' argument to create it." << std::endl;

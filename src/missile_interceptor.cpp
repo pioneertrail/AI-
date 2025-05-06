@@ -94,7 +94,7 @@ void PursuitScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel,
     
     // Interceptor starts directly behind target
     interceptor_pos = {50.0, 30.0};
-    interceptor_vel = {0.0, 10.0}; // Moving in same direction as target
+    interceptor_vel = {0.0, 10.0}; // Reverted to original
 }
 
 std::string PursuitScenario::getName() const {
@@ -161,8 +161,8 @@ std::string ManeuveringTargetScenario::getName() const {
 InterceptorSimulation::InterceptorSimulation(std::mt19937& rng) : rng_(rng), current_scenario_(nullptr) {
     // Initialize simulation parameters
     time_step_ = 0.1; // seconds
-    max_interceptor_accel_ = 35.0; // units/s^2
-    max_interceptor_jerk_ = 10.0; // units/s^3
+    max_interceptor_accel_ = 50.0; // units/s^2
+    max_interceptor_jerk_ = 20.0; // units/s^3
     world_bound_x_ = 100.0;
     world_bound_y_ = 100.0;
     intercept_radius_ = 2.0; 

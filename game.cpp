@@ -10,25 +10,58 @@
 #include <cstdlib>   // For rand(), srand()
 #include <ctime>     // For time()
 #include <memory>    // For make_unique
+#include <random>    // Include random for distributions
+#include <iomanip>   // For std::setprecision
+
+namespace { // Anonymous namespace for helper functions internal to this file
+
+// Helper function to apply a move code to a position
+void applyMove(Vec2& pos, int move_code, int grid_width, int grid_height) {
+    int dx = 0;
+    int dy = 0;
+    switch (move_code) {
+        case 1: dx = -1; break; // Left
+        case 2: dx =  1; break; // Right
+        case 3: dy = -1; break; // Up
+        case 4: dy =  1; break; // Down
+        case 0: default: break; // Stay or invalid
+    }
+
+    pos.x += dx;
+    pos.y += dy;
+
+    // Clamp to grid boundaries
+    if (pos.x < 0) pos.x = 0;
+    if (pos.x >= grid_width) pos.x = grid_width - 1;
+    if (pos.y < 0) pos.y = 0;
+    if (pos.y >= grid_height) pos.y = grid_height - 1;
+}
+
+} // end anonymous namespace
 
 // Game Constructor: Load the AI model
-Game::Game(const std::string& model_filename)
-    : ai_brain_(NeuralNetwork::loadModel(model_filename, std::make_unique<SGD>(0.01))), // Load model, LR for optimizer doesn't matter here
+Game::Game(const std::string& model_filename, std::mt19937& rng)
+    : ai_brain_(std::make_unique<SGD>(0.01), rng), // Initialize with optimizer and RNG directly
       grid_width_(20),
       grid_height_(10),
       game_over_(false),
-      game_message_("")
+      game_message_(""),
+      rng_(rng) // Initialize the RNG reference member
 {
-    srand(time(0)); // Seed for random starting positions
-
     // Initialize positions
     player_pos_ = {0, grid_height_ / 2}; // Start player mid-left
     target_pos_ = {grid_width_ - 1, grid_height_ / 2}; // Target mid-right
 
+    // Define distributions for enemy placement
+    std::uniform_int_distribution<int> width_dist(0, grid_width_ - 1);
+    std::uniform_int_distribution<int> height_dist(0, grid_height_ - 1);
+    std::uniform_int_distribution<int> offset_dist(-(grid_width_ / 8), grid_width_ / 4 - (grid_width_ / 8)); // Approximate original offset
+
     // Place enemy somewhere in the middle, avoiding player/target start
     do {
-        enemy_pos_.x = grid_width_ / 2 + (rand() % (grid_width_ / 4)) - (grid_width_ / 8);
-        enemy_pos_.y = rand() % grid_height_;
+        // Use the passed rng_ member
+        enemy_pos_.x = grid_width_ / 2 + offset_dist(rng_); 
+        enemy_pos_.y = height_dist(rng_); 
     } while (enemy_pos_ == player_pos_ || enemy_pos_ == target_pos_);
 
     // Clamp enemy position just in case
@@ -36,6 +69,15 @@ Game::Game(const std::string& model_filename)
     if (enemy_pos_.x >= grid_width_) enemy_pos_.x = grid_width_ - 1;
     if (enemy_pos_.y < 0) enemy_pos_.y = 0;
     if (enemy_pos_.y >= grid_height_) enemy_pos_.y = grid_height_ - 1;
+    
+    // Load the AI model now that ai_brain_ is properly initialized
+    try {
+        ai_brain_.loadModel(model_filename);
+        std::cout << "AI model '" << model_filename << "' loaded successfully." << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error loading AI model: " << e.what() << std::endl;
+        throw; // Re-throw the exception to be caught in main
+    }
 }
 
 // Main game loop
@@ -116,6 +158,14 @@ int Game::getAIMove() {
     // 2. Forward pass
     Matrix output = ai_brain_.forward(input);
 
+    // --- Debug: Print Raw Output Activations ---
+    std::cout << "AI Raw Output: [S, L, R, U, D] = [";
+    for(size_t j=0; j < output.getCols(); ++j) {
+        std::cout << std::fixed << std::setprecision(3) << output(0, j) << (j == output.getCols() - 1 ? "" : ", ");
+    }
+    std::cout << "]" << std::endl;
+    // --- End Debug ---
+
     // 3. Find the index of the maximum output value
     // (Assumes output is 1x5: [stay_conf, left_conf, right_conf, up_conf, down_conf])
     int best_move_code = 0; // Default to stay (code 0)
@@ -142,28 +192,6 @@ int Game::getAIMove() {
 
     std::cout << "AI decides move: " << move_desc << " (code " << best_move_code << ")" << std::endl;
     return best_move_code;
-}
-
-// Helper function to apply a move code to a position
-void applyMove(Vec2& pos, int move_code, int grid_width, int grid_height) {
-    int dx = 0;
-    int dy = 0;
-    switch (move_code) {
-        case 1: dx = -1; break; // Left
-        case 2: dx =  1; break; // Right
-        case 3: dy = -1; break; // Up
-        case 4: dy =  1; break; // Down
-        case 0: default: break; // Stay or invalid
-    }
-
-    pos.x += dx;
-    pos.y += dy;
-
-    // Clamp to grid boundaries
-    if (pos.x < 0) pos.x = 0;
-    if (pos.x >= grid_width) pos.x = grid_width - 1;
-    if (pos.y < 0) pos.y = 0;
-    if (pos.y >= grid_height) pos.y = grid_height - 1;
 }
 
 // Update player and enemy positions

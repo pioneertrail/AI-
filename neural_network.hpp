@@ -11,6 +11,7 @@
 #include "optimizer.hpp" // Include Optimizer header
 #include <string>      // For filenames
 #include <fstream>     // For file I/O
+#include <random>      // For std::mt19937
 
 class NeuralNetwork {
 public:
@@ -18,14 +19,15 @@ public:
      * @brief Construct a new Neural Network object.
      *
      * @param optimizer A unique_ptr to the optimizer to use for training.
+     * @param rng A reference to the random number generator for layer initialization.
      */
-    explicit NeuralNetwork(std::unique_ptr<Optimizer> optimizer);
+    explicit NeuralNetwork(std::unique_ptr<Optimizer> optimizer, std::mt19937& rng);
 
     /**
      * @brief Adds a PerceptronLayer to the network.
      *
-     * Note: The input size of this layer must match the output size of the previous layer.
-     * The first layer's input size determines the network's input size.
+     * The random number generator provided during NeuralNetwork construction
+     * will be used for initializing the layer's weights.
      *
      * @param input_size Number of inputs to this layer.
      * @param output_size Number of outputs (neurons) in this layer.
@@ -53,11 +55,13 @@ public:
 
     // --- Save/Load Model ---
     void saveModel(const std::string& filename) const;
-    static NeuralNetwork loadModel(const std::string& filename, std::unique_ptr<Optimizer> optimizer);
+    void loadModel(const std::string& filename);
 
 private:
     std::vector<std::unique_ptr<PerceptronLayer>> layers_;
     std::unique_ptr<Optimizer> optimizer_;
+    // Store reference to the RNG for layer creation
+    std::mt19937& rng_;
 };
 
 #endif // NEURAL_NETWORK_HPP 

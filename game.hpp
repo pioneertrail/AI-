@@ -5,6 +5,7 @@
 #include "matrix.hpp"
 #include <string>
 #include <memory> // For unique_ptr
+#include <random> // For std::mt19937
 
 // Forward declaration
 class NeuralNetwork;
@@ -22,7 +23,7 @@ struct Vec2 {
 
 class Game {
 public:
-    explicit Game(const std::string& model_filename);
+    explicit Game(const std::string& model_filename, std::mt19937& rng);
     void run();
 
 private:
@@ -41,6 +42,8 @@ private:
     Vec2 target_pos_;
     bool game_over_;
     std::string game_message_;
+    // Store a reference to the RNG passed from main
+    std::mt19937& rng_;
 };
 
 #endif // GAME_HPP 

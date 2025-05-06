@@ -8,47 +8,45 @@
 
 double MeanSquaredError::calculate(const Matrix& predictions, const Matrix& targets) const {
     if (predictions.getRows() != targets.getRows() || predictions.getCols() != targets.getCols()) {
-        throw std::invalid_argument("Predictions and targets must have the same dimensions for MSE calculation.");
+        throw std::invalid_argument("MSE calculate: Predictions and targets dimensions must match.");
+    }
+    if (predictions.getRows() == 0 || predictions.getCols() == 0) {
+         throw std::invalid_argument("MSE calculate: Input matrices cannot be empty.");
     }
 
     double sum_squared_error = 0.0;
-    size_t num_elements = 0;
+    size_t num_elements = predictions.getRows() * predictions.getCols();
 
     for (size_t i = 0; i < predictions.getRows(); ++i) {
         for (size_t j = 0; j < predictions.getCols(); ++j) {
             double diff = predictions(i, j) - targets(i, j);
-            sum_squared_error += diff * diff; // Use diff*diff instead of std::pow for efficiency
-            num_elements++;
+            sum_squared_error += diff * diff;
         }
     }
 
-    if (num_elements == 0) {
-        return 0.0; // Avoid division by zero if matrices are empty (though constructor prevents 0 dims)
-    }
-
+    // Return the mean squared error (average over all elements)
     return sum_squared_error / static_cast<double>(num_elements);
 }
 
 Matrix MeanSquaredError::derivative(const Matrix& predictions, const Matrix& targets) const {
     if (predictions.getRows() != targets.getRows() || predictions.getCols() != targets.getCols()) {
-        throw std::invalid_argument("Predictions and targets must have the same dimensions for MSE derivative.");
+        throw std::invalid_argument("MSE derivative: Predictions and targets dimensions must match.");
+    }
+     if (predictions.getRows() == 0 || predictions.getCols() == 0) {
+         throw std::invalid_argument("MSE derivative: Input matrices cannot be empty.");
     }
 
-    // Derivative: (2/N) * (predictions - targets)
-    // We can use the existing subtraction operator.
-    Matrix diff = predictions - targets;
+    size_t rows = predictions.getRows();
+    size_t cols = predictions.getCols();
+    Matrix gradient(rows, cols);
+    double num_elements = static_cast<double>(rows * cols); // For averaging the gradient
 
-    size_t num_elements = predictions.getRows() * predictions.getCols();
-    if (num_elements == 0) {
-        return diff; // Return empty diff matrix if dimensions were somehow 0
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            // Derivative of MSE w.r.t prediction_ij is 2 * (prediction_ij - target_ij) / N
+            gradient(i, j) = 2.0 * (predictions(i, j) - targets(i, j)) / num_elements;
+        }
     }
-
-    double scale = 2.0 / static_cast<double>(num_elements);
-
-    // Need scalar multiplication for the matrix. Let's implement it quickly.
-    // For now, iterate and multiply manually.
-    // TODO: Add scalar multiplication operator to Matrix class
-    Matrix gradient = diff * scale; // Use scalar multiplication operator
 
     return gradient;
 } 
