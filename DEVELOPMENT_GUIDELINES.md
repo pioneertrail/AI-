@@ -23,6 +23,8 @@
 7.  **Documentation:**
     *   Write clear comments for complex logic, design decisions, or non-obvious code sections.
     *   Use documentation comments (e.g., Doxygen style) for public APIs (classes, functions).
+    *   Component-specific documentation should be placed in the `docs/` directory.
+    *   See [docs/MISSILE_INTERCEPTOR.md](docs/MISSILE_INTERCEPTOR.md) as an example of component documentation.
 8.  **Version Control (Git):**
     *   Write clear, concise commit messages summarizing the changes.
     *   Commit frequently with logical units of work. 

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.0.0] - 2023-12-18
 
 ### Added
 - Missile Interceptor Simulation with Proportional Navigation guidance
@@ -16,4 +16,6 @@ All notable changes to this project will be documented in this file.
 - Improved code documentation with detailed comments and docstrings
 
 ### Removed
-- Removed monolithic test_scenarios.cpp in favor of modular design 
+- Removed monolithic test_scenarios.cpp in favor of modular design
+
+## [Unreleased] 

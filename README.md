@@ -20,12 +20,36 @@ Key features:
 - Proportional Navigation guidance implementation with acceleration and jerk constraints
 - Real-time visualization of interception attempts
 
-To run the simulation:
+#### Running the Simulation
+
+You can use the following batch files to build and run different aspects of the simulation:
+
 ```bash
-.\compile_missile_sim.bat
+# Build and run the main missile simulation
+.\compile_vs.bat
+
+# Run the interceptor test scenarios
+.\run_interceptor_test.bat
+
+# Run the interceptor with trained neural network guidance
+.\run_interceptor.bat
+
+# Run the prototype interceptor implementation
+.\run_prototype.bat
 ```
 
-This builds and runs `missile_sim.exe` using the Visual Studio compiler.
+#### Simulation Scenarios
+
+The simulation includes several test scenarios:
+- **Head-on Collision**: Interceptor and target moving directly toward each other
+- **Crossing Paths**: Interceptor and target moving on perpendicular trajectories
+- **Pursuit**: Interceptor chasing a target moving away
+- **High-Speed Target**: Interceptor attempting to catch a fast-moving target
+- **Maneuvering Target**: Interceptor tracking a target with changing velocity
+
+Use keyboard input to switch between scenarios during simulation.
+
+For detailed documentation on the missile interceptor implementation, see [docs/MISSILE_INTERCEPTOR.md](docs/MISSILE_INTERCEPTOR.md).
 
 ## Building
 
