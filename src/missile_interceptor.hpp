@@ -12,6 +12,8 @@
 #include <string>
 #include <random>
 #include <memory>
+#include <thread>
+#include <chrono>
 
 /**
  * Simple structure for 2D coordinates/vectors with basic vector operations
@@ -59,6 +61,18 @@ public:
      */
     virtual std::string getName() const = 0;
 };
+
+// Forward declarations of specific scenario classes
+class HeadOnScenario;
+class CrossingPathsScenario;
+class PursuitScenario;
+class HighSpeedScenario;
+class ManeuveringTargetScenario;
+
+// New scenario declarations
+class SpiralManeuverScenario;
+class LongRangeScenario;
+class AcceleratingTargetScenario;
 
 /**
  * Head-on interception scenario
@@ -130,6 +144,30 @@ public:
     std::string getName() const override;
 };
 
+class SpiralManeuverScenario : public Scenario {
+public:
+    virtual void setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
+                     Vec2& target_pos, Vec2& target_vel,
+                     Vec2& target_destination) override;
+    virtual std::string getName() const override;
+};
+
+class LongRangeScenario : public Scenario {
+public:
+    virtual void setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
+                     Vec2& target_pos, Vec2& target_vel, 
+                     Vec2& target_destination) override;
+    virtual std::string getName() const override;
+};
+
+class AcceleratingTargetScenario : public Scenario {
+public:
+    virtual void setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
+                     Vec2& target_pos, Vec2& target_vel,
+                     Vec2& target_destination) override;
+    virtual std::string getName() const override;
+};
+
 /**
  * Main simulation class for missile interception
  * Implements physics, guidance algorithms, and scenario management
@@ -158,7 +196,9 @@ public:
      */
     bool run(bool visualize = true);
 
-private:
+    /**
+     * Simulation status enum to track the current state
+     */
     enum class SimulationStatus {
         Active,
         Interception,
@@ -166,6 +206,52 @@ private:
         TargetReachedDestination
     };
     
+    /**
+     * Get the current target velocity
+     * @return Current target velocity vector
+     */
+    Vec2 getTargetVelocity() const { return target_vel_; }
+    
+    /**
+     * Set the target velocity to a new value
+     * @param new_vel New target velocity vector
+     */
+    void setTargetVelocity(const Vec2& new_vel) { target_vel_ = new_vel; }
+    
+    /**
+     * Calculates the desired acceleration using Proportional Navigation guidance
+     * 
+     * Implements the PN guidance law: a_c = N * V_c * ω
+     * where:
+     * - a_c: commanded acceleration (perpendicular to LOS)
+     * - N: navigation constant (gain)
+     * - V_c: closing velocity
+     * - ω: line-of-sight rate
+     * 
+     * @return Desired acceleration vector for the interceptor
+     */
+    Vec2 calculatePNGuidance();
+    
+    /**
+     * Update simulation state
+     * 
+     * @param interceptor_cmd Commanded acceleration for the interceptor
+     */
+    void updateState(const Vec2& interceptor_cmd);
+    
+    /**
+     * Check simulation status
+     * @return Current simulation status
+     */
+    SimulationStatus checkSimulationStatus();
+    
+    /**
+     * Display current state information
+     * @param step Current step number
+     */
+    void display(int step);
+
+private:
     // Simulation parameters
     double time_step_;
     double max_interceptor_accel_;
@@ -193,29 +279,6 @@ private:
     
     // Random number generator
     std::mt19937& rng_;
-    
-    // Display current state information
-    void display(int step);
-    
-    // Update simulation state
-    void updateState(const Vec2& interceptor_cmd);
-    
-    // Check simulation status
-    SimulationStatus checkSimulationStatus();
-    
-    /**
-     * Calculates the desired acceleration using Proportional Navigation guidance
-     * 
-     * Implements the PN guidance law: a_c = N * V_c * ω
-     * where:
-     * - a_c: commanded acceleration (perpendicular to LOS)
-     * - N: navigation constant (gain)
-     * - V_c: closing velocity
-     * - ω: line-of-sight rate
-     * 
-     * @return Desired acceleration vector for the interceptor
-     */
-    Vec2 calculatePNGuidance();
     
     /**
      * Applies realistic acceleration and jerk limits to desired acceleration

@@ -7,8 +7,8 @@
 #include <iostream>
 #include <cmath>
 #include <iomanip>
-#include <chrono>
 #include <thread>
+#include <chrono>
 
 // Vec2 implementation
 double Vec2::magnitude() const {
@@ -80,21 +80,21 @@ void PursuitScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel,
                            Vec2& target_pos, Vec2& target_vel,
                            Vec2& target_destination) {
     
-    // Target moves away from interceptor
+    // Target moves away but with a more significant angle
     target_pos = {50.0, 60.0};
-    target_destination = {50.0, 90.0};
+    target_destination = {62.0, 85.0};  // Lower destination to make it reachable sooner
     
     // Calculate velocity vector from pos to destination
     double dx = target_destination.x - target_pos.x;
     double dy = target_destination.y - target_pos.y;
     double dist = std::sqrt(dx*dx + dy*dy);
-    double speed = 12.0;
+    double speed = 10.0;  // Reduced target speed
     
     target_vel = {dx / dist * speed, dy / dist * speed};
     
-    // Interceptor starts directly behind target
-    interceptor_pos = {50.0, 30.0};
-    interceptor_vel = {0.0, 10.0}; // Reverted to original
+    // Interceptor starts with a better position
+    interceptor_pos = {42.0, 35.0};  // Higher starting point, more offset
+    interceptor_vel = {3.0, 22.0};   // Even higher speed with larger lateral component
 }
 
 std::string PursuitScenario::getName() const {
@@ -118,9 +118,9 @@ void HighSpeedScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel,
     
     target_vel = {dx / dist * speed, dy / dist * speed};
     
-    // Interceptor starts near bottom center
-    interceptor_pos = {50.0, 10.0};
-    interceptor_vel = {0.0, 5.0}; // Initially moving upward
+    // Interceptor starts directly in the target's path
+    interceptor_pos = {25.0, 45.0}; // Positioned directly in target's path
+    interceptor_vel = {12.0, 5.0}; // Strong initial velocity toward interception point
 }
 
 std::string HighSpeedScenario::getName() const {
@@ -157,6 +157,85 @@ std::string ManeuveringTargetScenario::getName() const {
     return "Maneuvering Target";
 }
 
+// SpiralManeuverScenario implementation
+void SpiralManeuverScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
+                                Vec2& target_pos, Vec2& target_vel,
+                                Vec2& target_destination) {
+    
+    // Target starts at left side with upward velocity
+    target_pos = {10.0, 40.0};
+    target_destination = {75.0, 75.0}; // Diagonal destination
+    
+    // Initialize with velocity perpendicular to destination for spiral effect
+    double dx = target_destination.x - target_pos.x;
+    double dy = target_destination.y - target_pos.y;
+    // Set velocity perpendicular to direct path
+    double speed = 20.0;
+    target_vel = {dy / std::sqrt(dx*dx + dy*dy) * speed, 
+                 -dx / std::sqrt(dx*dx + dy*dy) * speed};
+    
+    // Interceptor positioned for challenging angle
+    interceptor_pos = {80.0, 20.0};
+    interceptor_vel = {-3.0, 4.0};
+}
+
+std::string SpiralManeuverScenario::getName() const {
+    return "Spiral Maneuver Target";
+}
+
+// LongRangeScenario implementation
+void LongRangeScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
+                            Vec2& target_pos, Vec2& target_vel,
+                            Vec2& target_destination) {
+    
+    // Target and interceptor start very far apart
+    target_pos = {5.0, 10.0};
+    target_destination = {95.0, 90.0};
+    
+    // Target moves diagonally across field
+    double dx = target_destination.x - target_pos.x;
+    double dy = target_destination.y - target_pos.y;
+    double dist = std::sqrt(dx*dx + dy*dy);
+    double speed = 15.0;
+    
+    target_vel = {dx / dist * speed, dy / dist * speed};
+    
+    // Interceptor starts distant with challenging angle
+    interceptor_pos = {90.0, 5.0};
+    interceptor_vel = {-6.0, 2.0};
+}
+
+std::string LongRangeScenario::getName() const {
+    return "Long Range Intercept";
+}
+
+// AcceleratingTargetScenario implementation
+void AcceleratingTargetScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
+                                     Vec2& target_pos, Vec2& target_vel,
+                                     Vec2& target_destination) {
+    
+    // Target starts slow but will accelerate during the simulation
+    // (acceleration is implemented in main.cpp since we have to modify target vel)
+    target_pos = {20.0, 80.0};
+    target_destination = {80.0, 20.0};
+    
+    // Initial slow velocity toward destination
+    double dx = target_destination.x - target_pos.x;
+    double dy = target_destination.y - target_pos.y;
+    double dist = std::sqrt(dx*dx + dy*dy);
+    double initial_speed = 10.0; // Initially slow
+    
+    target_vel = {dx / dist * initial_speed, dy / dist * initial_speed};
+    
+    // Interceptor starts at opposite corner
+    interceptor_pos = {80.0, 90.0};
+    interceptor_vel = {-4.0, -2.0};
+}
+
+std::string AcceleratingTargetScenario::getName() const {
+    return "Accelerating Target";
+}
+
 // InterceptorSimulation implementation
 InterceptorSimulation::InterceptorSimulation(std::mt19937& rng) : rng_(rng), current_scenario_(nullptr) {
     // Initialize simulation parameters
@@ -170,8 +249,8 @@ InterceptorSimulation::InterceptorSimulation(std::mt19937& rng) : rng_(rng), cur
     gravity_ = 0.0; // No gravity for horizontal simulation
     
     // Navigation constants
-    nav_constant_base_ = 5.0;
-    nav_constant_scale_ = 0.0;
+    nav_constant_base_ = 6.0; // Increased from 5.0 for more aggressive guidance
+    nav_constant_scale_ = 3.0; // Increased from 2.0 for better terminal guidance
     
     // Initialize acceleration
     interceptor_accel_ = {0.0, 0.0};
@@ -217,8 +296,10 @@ bool InterceptorSimulation::run(bool visualize) {
         if (visualize) {
             display(step_count);
             
-            // Pause for visualization
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            // Simple delay for visualization
+            for (volatile long i = 0; i < 10000000; i++) {
+                // Empty loop to create delay without thread library
+            }
         }
         
         // Check simulation status
@@ -327,11 +408,12 @@ Vec2 InterceptorSimulation::calculatePNGuidance() {
     // Calculate closing velocity (negative of relative velocity projected onto LOS)
     double closing_velocity = -(rel_vel.x * los_unit.x + rel_vel.y * los_unit.y);
     
-    // Early return if not closing with the target
-    if (closing_velocity <= 0.1) {
-        // If not closing, add some acceleration towards target
-        pn_accel.x = los_unit.x * max_interceptor_accel_ * 0.5;
-        pn_accel.y = los_unit.y * max_interceptor_accel_ * 0.5;
+    // Enhanced behavior for tail-chase scenarios (low closing velocity)
+    if (closing_velocity <= 0.5) {
+        // Use pure pursuit guidance for very low closing rates
+        double pursuit_gain = 5.0; // Increased from 3.0 for more aggressive pursuit
+        pn_accel.x = los_unit.x * max_interceptor_accel_ * pursuit_gain;
+        pn_accel.y = los_unit.y * max_interceptor_accel_ * pursuit_gain;
         return pn_accel;
     }
     
@@ -350,11 +432,18 @@ Vec2 InterceptorSimulation::calculatePNGuidance() {
     // Calculate time-to-go
     double time_to_go = los_dist / std::max(closing_velocity, 0.1);
     
-    // Adjust navigation constant based on time-to-go
+    // Adjust navigation constant based on time-to-go and closing velocity
     double adjusted_nav_constant = nav_constant_base_;
+    
     // Increase navigation constant as we get closer to intercept
     if (time_to_go < 5.0) {
         adjusted_nav_constant = nav_constant_base_ + nav_constant_scale_ * (5.0 - time_to_go);
+    }
+    
+    // For low closing velocities (tail-chase), increase the navigation constant
+    if (closing_velocity < 5.0) {
+        double closing_factor = 1.0 + (5.0 - closing_velocity) * 0.5;
+        adjusted_nav_constant *= closing_factor;
     }
     
     // Calculate PN acceleration perpendicular to LOS
