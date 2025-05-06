@@ -1,6 +1,13 @@
 /**
  * @file console_renderer.cpp
  * @brief Implementation of the ASCII console renderer.
+ * 
+ * NOTE: This renderer performs console I/O (clearing, printing) within the
+ *       simulation loop via presentFrame(). This introduces overhead that can
+ *       significantly alter the real-time execution flow compared to NullRenderer.
+ *       For highly timing-sensitive scenarios (like the Spiral Maneuver Target
+ *       in this project), this can lead to different outcomes (e.g., failures)
+ *       that are not present when running without this visualization.
  */
 
 #include "console_renderer.hpp"

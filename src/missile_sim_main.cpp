@@ -19,27 +19,41 @@ int main(int argc, char* argv[]) {
     std::cout << "and RK4 integration physics." << std::endl << std::endl;
     
     // Default settings
-    bool use_visualization = true; // Default to using a renderer
+    bool use_visualization = false; // Default to NO visualization (uses NullRenderer)
     bool run_all_scenarios = true;
     bool run_pursuit_only = false;
     int step_delay_ms = 50; // Default delay for visualization
 
     // Check for command line arguments
-    if (argc > 1) {
-        std::string arg(argv[1]);
+    bool no_vis_flag = false;
+    bool vis_console_flag = false; // Explicit flag to request console
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
         if (arg == "--pursuit" || arg == "-p") {
             run_pursuit_only = true;
             run_all_scenarios = false;
-            std::cout << "Running Pursuit scenario only" << std::endl;
+            std::cout << "Running Pursuit scenario only." << std::endl;
         } else if (arg == "--no-vis") {
-            use_visualization = false;
-            std::cout << "Visualization disabled." << std::endl;
-        } else if (arg == "--fast") {
-             use_visualization = true; // Keep visualization but remove delay
+            no_vis_flag = true;
+            std::cout << "Visualization explicitly disabled." << std::endl;
+        } else if (arg == "--vis-console") {
+            vis_console_flag = true;
+            std::cout << "Console visualization requested." << std::endl;
+        } else if (arg == "--fast") { // Keep fast flag to remove delay
              step_delay_ms = 0;
-             std::cout << "Running visualization without step delay." << std::endl;
+             std::cout << "Running visualization (if enabled) without step delay." << std::endl;
         }
+        // Add other argument parsing here if needed
     }
+
+    // Determine if visualization should be used and which renderer
+    if (no_vis_flag) {
+        use_visualization = false;
+    } else if (vis_console_flag) {
+        use_visualization = true; // Enable if explicitly requested
+    } // Add other conditions like else if (vis_sdl_flag) ...
+      // Default remains false if no specific visual flag is set.
     
     // Initialize random number generator
     std::random_device rd;
@@ -49,11 +63,14 @@ int main(int argc, char* argv[]) {
         // Create the chosen Renderer
         std::unique_ptr<IRenderer> renderer;
         if (use_visualization) {
+            // NOTE: ConsoleRenderer introduces I/O overhead that can affect the timing
+            //       of highly sensitive scenarios (e.g., Spiral Maneuver Target),
+            //       potentially causing failures that don't occur with NullRenderer.
             renderer = std::make_unique<ConsoleRenderer>();
             std::cout << "Using Console Renderer." << std::endl;
         } else {
             renderer = std::make_unique<NullRenderer>();
-             std::cout << "Using Null Renderer (no visualization)." << std::endl;
+            std::cout << "Using Null Renderer (no visualization)." << std::endl;
         }
 
         // Create simulation instance, passing the renderer

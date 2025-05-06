@@ -333,7 +333,9 @@ bool InterceptorSimulation::run(bool use_visualization, int step_delay_ms) {
         
         current_status_ = checkSimulationStatus(); // Update status
 
-        if (use_visualization && renderer_) {
+        // --- Visualization ---
+        const int RENDER_INTERVAL = 3; 
+        if (use_visualization && renderer_ && (step_count % RENDER_INTERVAL == 0)) {
             // Populate RenderData struct
             RenderData frame_data;
             frame_data.interceptor_pos = interceptor_pos_;
@@ -348,7 +350,7 @@ bool InterceptorSimulation::run(bool use_visualization, int step_delay_ms) {
             renderer_->renderFrame(frame_data, world_bound_x_, world_bound_y_);
             renderer_->presentFrame();
 
-            // Apply delay if specified
+            // Optional delay was here, removed
             if (step_delay_ms > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(step_delay_ms));
             }
@@ -427,21 +429,15 @@ InterceptorSimulation::SimulationStatus InterceptorSimulation::checkSimulationSt
 }
 
 Vec2 InterceptorSimulation::calculatePNGuidance(int step_count, const Vec2& target_acceleration_estimate) {
-    Vec2 pn_accel = {0.0, 0.0}; // Default to no acceleration
-    
-    // *** HYBRID APPROACH: Check for specific scenario ***
+    Vec2 pn_accel = {0.0, 0.0}; 
     bool is_spiral_scenario = (current_scenario_ && current_scenario_->getName() == "Spiral Maneuver Target");
-
-    // Define scenario-specific navigation constants
     double scenario_nav_constant_base = nav_constant_base_; 
-    double scenario_nav_constant_scale = nav_constant_scale_;
-
+    double scenario_nav_constant_scale = nav_constant_scale_; 
     if (is_spiral_scenario) {
-        // Use significantly more aggressive parameters for the Spiral scenario
-        scenario_nav_constant_base = 10.0; // Increased from 6.0
-        scenario_nav_constant_scale = 5.0;  // Increased from 3.0
+        // Reverted to the slightly less aggressive constants that worked in isolation
+        scenario_nav_constant_base = 10.0; // Reverted from 12.0
+        scenario_nav_constant_scale = 5.0;  // Reverted from 6.0
     }
-    
     // Calculate Line-Of-Sight (LOS) vector
     Vec2 los;
     los.x = target_pos_.x - interceptor_pos_.x;
@@ -477,17 +473,10 @@ Vec2 InterceptorSimulation::calculatePNGuidance(int step_count, const Vec2& targ
     double time_to_go = los_dist / std::max(closing_velocity, 0.1);
     
     // Adjust navigation constant based on time-to-go, closing velocity, and LOS rate
-    // *** USE SCENARIO-SPECIFIC CONSTANTS ***
     double adjusted_nav_constant = scenario_nav_constant_base;
     const double HIGH_LOS_RATE_THRESHOLD = 0.3; 
-    
-    if (time_to_go < 5.0) {
-        adjusted_nav_constant = scenario_nav_constant_base + scenario_nav_constant_scale * (1.0 - time_to_go / 5.0);
-    }
-    if (closing_velocity < 5.0) {
-        double closing_factor = 1.0 + (5.0 - closing_velocity) * 0.5; 
-        adjusted_nav_constant *= closing_factor;
-    }
+    if (time_to_go < 5.0) { adjusted_nav_constant = scenario_nav_constant_base + scenario_nav_constant_scale * (1.0 - time_to_go / 5.0); }
+    if (closing_velocity < 5.0) { double closing_factor = 1.0 + (5.0 - closing_velocity) * 0.5; adjusted_nav_constant *= closing_factor; }
     if (std::abs(los_rate) > HIGH_LOS_RATE_THRESHOLD && time_to_go < 8.0) { 
         double los_rate_factor = 1.0 + (std::abs(los_rate) - HIGH_LOS_RATE_THRESHOLD) * 1.5; 
         adjusted_nav_constant *= std::min(los_rate_factor, 2.0); 
