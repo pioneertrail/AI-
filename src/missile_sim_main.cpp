@@ -51,6 +51,16 @@ int main(int argc, char* argv[]) {
         int total_scenarios = 0;
         int successful_intercepts = 0;
         
+        /* // Code for running only one scenario - commented out
+        // Run Spiral Maneuver Target scenario only
+        std::cout << "\n==== Running ONLY: " << scenario6.getName() << " ====\n" << std::endl;
+        sim.loadScenario(&scenario6);
+        if (sim.run()) {
+            successful_intercepts++;
+        }
+        total_scenarios = 1;
+        */
+        
         // Run Pursuit scenario only if requested
         if (run_pursuit_only) {
             sim.loadScenario(&scenario3);
@@ -106,60 +116,10 @@ int main(int argc, char* argv[]) {
             
             std::this_thread::sleep_for(std::chrono::seconds(1));
             
-            // Special handling for accelerating target scenario
+            // Special handling for accelerating target scenario NO LONGER NEEDED HERE
+            // Acceleration is now estimated within the InterceptorSimulation::run loop
             sim.loadScenario(&scenario8);
-            
-            // Custom run for accelerating target
-            bool simulation_active = true;
-            int step_count = 0;
-            const int max_steps = 1000;
-            bool intercept_success = false;
-            
-            std::cout << "\n==== Running Special Scenario: " << scenario8.getName() << " ====\n" << std::endl;
-            std::cout << "Target will accelerate during flight!" << std::endl;
-            
-            // Get initial target velocity direction
-            Vec2 target_vel = sim.getTargetVelocity();
-            Vec2 target_vel_dir = target_vel;
-            double speed = std::sqrt(target_vel.x * target_vel.x + target_vel.y * target_vel.y);
-            target_vel_dir.x /= speed;
-            target_vel_dir.y /= speed;
-            
-            while (simulation_active && step_count < max_steps) {
-                // Calculate guidance
-                Vec2 accel = sim.calculatePNGuidance();
-                
-                // Update interceptor position and velocity
-                sim.updateState(accel);
-                
-                // Accelerate target every 5 steps
-                if (step_count % 5 == 0 && step_count < 30) {
-                    target_vel = sim.getTargetVelocity();
-                    speed = std::sqrt(target_vel.x * target_vel.x + target_vel.y * target_vel.y);
-                    // Increase speed by 2 units/s, keeping direction
-                    speed += 2.0;
-                    target_vel.x = target_vel_dir.x * speed;
-                    target_vel.y = target_vel_dir.y * speed;
-                    sim.setTargetVelocity(target_vel);
-                    
-                    std::cout << "Target accelerated to speed: " << speed << std::endl;
-                }
-                
-                // Display current state
-                sim.display(step_count);
-                
-                // Check simulation status
-                InterceptorSimulation::SimulationStatus status = sim.checkSimulationStatus();
-                simulation_active = (status == InterceptorSimulation::SimulationStatus::Active);
-                intercept_success = (status == InterceptorSimulation::SimulationStatus::Interception);
-                
-                step_count++;
-                
-                // Brief pause between steps
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
-            
-            if (intercept_success) successful_intercepts++;
+            if (sim.run()) successful_intercepts++; // Just run normally
             total_scenarios++;
         }
         

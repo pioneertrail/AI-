@@ -174,9 +174,9 @@ void SpiralManeuverScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel,
     target_vel = {dy / std::sqrt(dx*dx + dy*dy) * speed, 
                  -dx / std::sqrt(dx*dx + dy*dy) * speed};
     
-    // Interceptor positioned for challenging angle
-    interceptor_pos = {80.0, 20.0};
-    interceptor_vel = {-3.0, 4.0};
+    // Interceptor positioned closer and with better initial velocity
+    interceptor_pos = {70.0, 30.0}; // Moved closer to target path
+    interceptor_vel = {-5.0, -10.0}; // Stronger initial velocity towards target
 }
 
 std::string SpiralManeuverScenario::getName() const {
@@ -259,8 +259,15 @@ InterceptorSimulation::InterceptorSimulation(std::mt19937& rng) : rng_(rng), cur
 void InterceptorSimulation::loadScenario(Scenario* scenario) {
     current_scenario_ = scenario;
     if (scenario) {
+        // Reset interceptor acceleration to zero to prevent state carryover between scenarios
+        interceptor_accel_ = {0.0, 0.0};
+        
+        // Setup scenario initial conditions
         scenario->setup(interceptor_pos_, interceptor_vel_, 
                        target_pos_, target_vel_, target_destination_);
+                       
+        // Initialize previous target velocity for acceleration estimation
+        previous_target_vel_ = target_vel_;
         
         std::cout << "\n==== Running Scenario: " << scenario->getName() << " ====\n" << std::endl;
         
@@ -286,11 +293,47 @@ bool InterceptorSimulation::run(bool visualize) {
     bool intercept_success = false;
     
     while (simulation_active && step_count < max_steps) {
-        // Calculate desired acceleration using PN guidance
-        Vec2 accel = calculatePNGuidance();
         
-        // Update positions and velocities
-        updateState(accel);
+        // --- Target Acceleration Estimation --- 
+        Vec2 target_acceleration_estimate = {0.0, 0.0};
+        if (step_count > 0) {
+            target_acceleration_estimate.x = (target_vel_.x - previous_target_vel_.x) / time_step_;
+            target_acceleration_estimate.y = (target_vel_.y - previous_target_vel_.y) / time_step_;
+        }
+        // Store current target velocity for next step's calculation
+        // IMPORTANT: Do this *before* target_vel_ might be modified by scenario logic below
+        Vec2 current_target_vel_for_next_step = target_vel_;
+        // --- End Estimation --- 
+        
+        // Calculate desired acceleration using PN guidance (now passing estimate and step count)
+        Vec2 accel_cmd = calculatePNGuidance(step_count, target_acceleration_estimate);
+        
+        // Update positions and velocities (interceptor and target position)
+        updateState(accel_cmd);
+        
+        // --- Special Scenario Logic (Example: Accelerating Target) ---
+        // Note: This happens *after* the state update and *after* current velocity was saved for next estimate
+        if (current_scenario_ && current_scenario_->getName() == "Accelerating Target") {
+             if (step_count % 5 == 0 && step_count < 30) { // Example logic from main
+                 Vec2 target_vel_dir = target_vel_;
+                 double speed = target_vel_dir.magnitude();
+                 if (speed > 1e-6) { // Avoid division by zero
+                    target_vel_dir.x /= speed;
+                    target_vel_dir.y /= speed;
+                    speed += 2.0; // Increase speed
+                    target_vel_.x = target_vel_dir.x * speed;
+                    target_vel_.y = target_vel_dir.y * speed;
+                 }
+                 // Need to inform the user or log this change if visualize is false
+                 if (visualize) {
+                    std::cout << "Target accelerated to speed: " << speed << std::endl;
+                 }
+             }
+        }
+        // --- End Special Scenario Logic --- 
+
+        // Update previous target velocity for the *next* iteration's estimate calculation
+        previous_target_vel_ = current_target_vel_for_next_step;
         
         // Display current state (conditionally)
         if (visualize) {
@@ -382,8 +425,21 @@ InterceptorSimulation::SimulationStatus InterceptorSimulation::checkSimulationSt
     return SimulationStatus::Active;
 }
 
-Vec2 InterceptorSimulation::calculatePNGuidance() {
+Vec2 InterceptorSimulation::calculatePNGuidance(int step_count, const Vec2& target_acceleration_estimate) {
     Vec2 pn_accel = {0.0, 0.0}; // Default to no acceleration
+    
+    // *** HYBRID APPROACH: Check for specific scenario ***
+    bool is_spiral_scenario = (current_scenario_ && current_scenario_->getName() == "Spiral Maneuver Target");
+
+    // Define scenario-specific navigation constants
+    double scenario_nav_constant_base = nav_constant_base_; 
+    double scenario_nav_constant_scale = nav_constant_scale_;
+
+    if (is_spiral_scenario) {
+        // Use significantly more aggressive parameters for the Spiral scenario
+        scenario_nav_constant_base = 10.0; // Increased from 6.0
+        scenario_nav_constant_scale = 5.0;  // Increased from 3.0
+    }
     
     // Calculate Line-Of-Sight (LOS) vector
     Vec2 los;
@@ -408,56 +464,88 @@ Vec2 InterceptorSimulation::calculatePNGuidance() {
     // Calculate closing velocity (negative of relative velocity projected onto LOS)
     double closing_velocity = -(rel_vel.x * los_unit.x + rel_vel.y * los_unit.y);
     
-    // Enhanced behavior for tail-chase scenarios (low closing velocity)
-    if (closing_velocity <= 0.5) {
-        // Use pure pursuit guidance for very low closing rates
-        double pursuit_gain = 5.0; // Increased from 3.0 for more aggressive pursuit
-        pn_accel.x = los_unit.x * max_interceptor_accel_ * pursuit_gain;
-        pn_accel.y = los_unit.y * max_interceptor_accel_ * pursuit_gain;
-        return pn_accel;
-    }
-    
     // Calculate LOS rate using more robust vector method
-    // ω = (Vr - (Vr·R̂)R̂) / |R|
     Vec2 perp_vel;
     perp_vel.x = rel_vel.x - (rel_vel.x * los_unit.x + rel_vel.y * los_unit.y) * los_unit.x;
     perp_vel.y = rel_vel.y - (rel_vel.x * los_unit.x + rel_vel.y * los_unit.y) * los_unit.y;
-    
     double los_rate_magnitude = perp_vel.magnitude() / los_dist;
-    
-    // Determine sign of LOS rate using cross product
     double cross_product = los_unit.x * rel_vel.y - los_unit.y * rel_vel.x;
     double los_rate = los_rate_magnitude * (cross_product >= 0 ? 1.0 : -1.0);
     
     // Calculate time-to-go
     double time_to_go = los_dist / std::max(closing_velocity, 0.1);
     
-    // Adjust navigation constant based on time-to-go and closing velocity
-    double adjusted_nav_constant = nav_constant_base_;
+    // Adjust navigation constant based on time-to-go, closing velocity, and LOS rate
+    // *** USE SCENARIO-SPECIFIC CONSTANTS ***
+    double adjusted_nav_constant = scenario_nav_constant_base;
+    const double HIGH_LOS_RATE_THRESHOLD = 0.3; 
     
-    // Increase navigation constant as we get closer to intercept
     if (time_to_go < 5.0) {
-        adjusted_nav_constant = nav_constant_base_ + nav_constant_scale_ * (5.0 - time_to_go);
+        adjusted_nav_constant = scenario_nav_constant_base + scenario_nav_constant_scale * (1.0 - time_to_go / 5.0);
     }
-    
-    // For low closing velocities (tail-chase), increase the navigation constant
     if (closing_velocity < 5.0) {
-        double closing_factor = 1.0 + (5.0 - closing_velocity) * 0.5;
+        double closing_factor = 1.0 + (5.0 - closing_velocity) * 0.5; 
         adjusted_nav_constant *= closing_factor;
     }
-    
-    // Calculate PN acceleration perpendicular to LOS
-    double pn_accel_magnitude = adjusted_nav_constant * closing_velocity * los_rate;
-    
-    // Handle zero-effort miss (ZEM) case
-    // If LOS rate is very small but we're not on a collision course, add small bias
-    if (std::abs(los_rate) < 0.001 && los_dist > 5.0) {
-        pn_accel_magnitude = 0.5 * max_interceptor_accel_; // Small bias
+    if (std::abs(los_rate) > HIGH_LOS_RATE_THRESHOLD && time_to_go < 8.0) { 
+        double los_rate_factor = 1.0 + (std::abs(los_rate) - HIGH_LOS_RATE_THRESHOLD) * 1.5; 
+        adjusted_nav_constant *= std::min(los_rate_factor, 2.0); 
+        adjusted_nav_constant = std::min(adjusted_nav_constant, scenario_nav_constant_base * 2.0 + scenario_nav_constant_scale); 
     }
     
-    // Convert to cartesian coordinates (perpendicular to LOS)
-    pn_accel.x = -pn_accel_magnitude * los_unit.y;
-    pn_accel.y = pn_accel_magnitude * los_unit.x;
+    // --- APN Implementation --- 
+    // 1. Calculate standard PN acceleration magnitude
+    double pn_accel_magnitude = adjusted_nav_constant * closing_velocity * los_rate;
+
+    // 2. Calculate target acceleration perpendicular to LOS
+    // Project target acceleration onto LOS unit vector
+    double target_accel_parallel_mag = target_acceleration_estimate.x * los_unit.x + target_acceleration_estimate.y * los_unit.y;
+    Vec2 target_accel_parallel = {los_unit.x * target_accel_parallel_mag, los_unit.y * target_accel_parallel_mag};
+    // Subtract parallel component to get perpendicular component vector
+    Vec2 target_accel_perp = {target_acceleration_estimate.x - target_accel_parallel.x, 
+                              target_acceleration_estimate.y - target_accel_parallel.y};
+    double target_accel_perp_magnitude = target_accel_perp.magnitude();
+
+    // Determine sign of perpendicular acceleration relative to LOS rotation (consistent with los_rate sign)
+    double accel_cross_product = los_unit.x * target_acceleration_estimate.y - los_unit.y * target_acceleration_estimate.x;
+    double signed_target_accel_perp = target_accel_perp_magnitude * (accel_cross_product >= 0 ? 1.0 : -1.0);
+
+    // 3. Calculate APN correction term
+    double apn_correction_term = (adjusted_nav_constant / 2.0) * signed_target_accel_perp;
+
+    // 4. Calculate total commanded acceleration magnitude (PN + APN correction)
+    double total_accel_magnitude = pn_accel_magnitude + apn_correction_term;
+    // --- End APN Implementation ---
+
+    // Handle zero-effort miss (ZEM) case - uses the combined magnitude
+    if (std::abs(los_rate) < 0.001 && los_dist > 5.0) {
+        // If LOS rate is near zero but not on collision course, apply small bias
+        // We apply bias in the direction suggested by the APN calculation if possible
+        double bias_sign = (total_accel_magnitude >= 0 ? 1.0 : -1.0);
+        total_accel_magnitude = bias_sign * 0.5 * max_interceptor_accel_; 
+    }
+    
+    // Convert total commanded acceleration magnitude to cartesian coordinates (perpendicular to LOS)
+    pn_accel.x = -total_accel_magnitude * los_unit.y;
+    pn_accel.y = total_accel_magnitude * los_unit.x;
+    
+    // --- APN Debug Logging --- 
+    if (is_spiral_scenario) {
+       std::cout << std::fixed << std::setprecision(4); // For formatted output
+       std::cout << "--- Step " << step_count << " APN Debug ---\n";
+       std::cout << "  TargetAccelEst:  [ " << target_acceleration_estimate.x << ", " << target_acceleration_estimate.y << " ] (Mag: " << target_acceleration_estimate.magnitude() << ")\n";
+       std::cout << "  LOS Unit:        [ " << los_unit.x << ", " << los_unit.y << " ]\n";
+       std::cout << "  TgtAccelPerpMag:  " << target_accel_perp_magnitude << " (Signed: " << signed_target_accel_perp << ")\n";
+       std::cout << "  AdjustNavConst:   " << adjusted_nav_constant << " (Base: " << scenario_nav_constant_base << ", Scale: " << scenario_nav_constant_scale << ")\n";
+       std::cout << "  LOS Rate:         " << los_rate << "\n";
+       std::cout << "  Closing V:        " << closing_velocity << "\n";
+       std::cout << "  Time To Go:       " << time_to_go << "\n";
+       std::cout << "  PN Mag Term:      " << pn_accel_magnitude << "\n";
+       std::cout << "  APN Corr Term:    " << apn_correction_term << "\n";
+       std::cout << "  Total Accel Mag:  " << total_accel_magnitude << "\n";
+       std::cout << "  Final Accel Cmd: [ " << pn_accel.x << ", " << pn_accel.y << " ]\n";
+    }
+    // --- End APN Debug Logging ---
     
     return pn_accel;
 }

@@ -228,9 +228,11 @@ public:
      * - V_c: closing velocity
      * - ω: line-of-sight rate
      * 
+     * @param step_count Current simulation step number (for logging)
+     * @param target_acceleration_estimate Estimated target acceleration vector
      * @return Desired acceleration vector for the interceptor
      */
-    Vec2 calculatePNGuidance();
+    Vec2 calculatePNGuidance(int step_count, const Vec2& target_acceleration_estimate);
     
     /**
      * Update simulation state
@@ -273,6 +275,7 @@ private:
     Vec2 target_pos_;
     Vec2 target_vel_;
     Vec2 target_destination_;
+    Vec2 previous_target_vel_;
     
     // Current scenario
     Scenario* current_scenario_;
