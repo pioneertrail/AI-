@@ -14,26 +14,9 @@
 #include <memory>
 #include <thread>
 #include <chrono>
-
-/**
- * Simple structure for 2D coordinates/vectors with basic vector operations
- */
-struct Vec2 {
-    double x = 0.0;
-    double y = 0.0;
-    
-    /**
-     * Calculate the magnitude (length) of the vector
-     * @return The Euclidean norm of the vector
-     */
-    double magnitude() const;
-    
-    /**
-     * Normalize the vector to unit length
-     * If vector is too small (near zero), no normalization is performed
-     */
-    void normalize();
-};
+#include <vector>
+#include "vec2.hpp"
+#include "renderer.hpp"
 
 /**
  * Base class for interception scenarios
@@ -175,12 +158,25 @@ public:
 class InterceptorSimulation {
 public:
     /**
-     * Constructor initializes simulation parameters
-     * 
-     * @param rng Reference to a random number generator
+     * Simulation status enum to track the current state
      */
-    InterceptorSimulation(std::mt19937& rng);
+    enum class SimulationStatus {
+        Active,
+        Interception,
+        TargetEscaped,
+        TargetReachedDestination
+    };
+
+    /**
+     * Constructor initializes simulation parameters and takes ownership of a renderer.
+     * 
+     * @param rng Reference to a random number generator.
+     * @param renderer Unique pointer to the renderer implementation to use.
+     */
+    InterceptorSimulation(std::mt19937& rng, std::unique_ptr<IRenderer> renderer);
     
+    ~InterceptorSimulation(); // Destructor to handle renderer shutdown
+
     /**
      * Loads a scenario and initializes simulation state
      * 
@@ -191,67 +187,17 @@ public:
     /**
      * Runs the simulation until completion or max step count
      * 
-     * @param visualize Whether to display state information during simulation
+     * @param use_visualization Whether to invoke the renderer during the run.
+     * @param step_delay_ms Optional delay between steps when visualizing (milliseconds).
      * @return True if interception was successful, false otherwise
      */
-    bool run(bool visualize = true);
+    bool run(bool use_visualization = true, int step_delay_ms = 0);
 
-    /**
-     * Simulation status enum to track the current state
-     */
-    enum class SimulationStatus {
-        Active,
-        Interception,
-        TargetEscaped,
-        TargetReachedDestination
-    };
-    
-    /**
-     * Get the current target velocity
-     * @return Current target velocity vector
-     */
+    // Removed visualize_console_plot_ flag, visualization is now controlled by the passed renderer and use_visualization flag
+
+    // --- Public methods for accessing state (if needed) ---
     Vec2 getTargetVelocity() const { return target_vel_; }
-    
-    /**
-     * Set the target velocity to a new value
-     * @param new_vel New target velocity vector
-     */
     void setTargetVelocity(const Vec2& new_vel) { target_vel_ = new_vel; }
-    
-    /**
-     * Calculates the desired acceleration using Proportional Navigation guidance
-     * 
-     * Implements the PN guidance law: a_c = N * V_c * ω
-     * where:
-     * - a_c: commanded acceleration (perpendicular to LOS)
-     * - N: navigation constant (gain)
-     * - V_c: closing velocity
-     * - ω: line-of-sight rate
-     * 
-     * @param step_count Current simulation step number (for logging)
-     * @param target_acceleration_estimate Estimated target acceleration vector
-     * @return Desired acceleration vector for the interceptor
-     */
-    Vec2 calculatePNGuidance(int step_count, const Vec2& target_acceleration_estimate);
-    
-    /**
-     * Update simulation state
-     * 
-     * @param interceptor_cmd Commanded acceleration for the interceptor
-     */
-    void updateState(const Vec2& interceptor_cmd);
-    
-    /**
-     * Check simulation status
-     * @return Current simulation status
-     */
-    SimulationStatus checkSimulationStatus();
-    
-    /**
-     * Display current state information
-     * @param step Current step number
-     */
-    void display(int step);
 
 private:
     // Simulation parameters
@@ -276,32 +222,31 @@ private:
     Vec2 target_vel_;
     Vec2 target_destination_;
     Vec2 previous_target_vel_;
+    SimulationStatus current_status_ = SimulationStatus::Active;
     
     // Current scenario
-    Scenario* current_scenario_;
+    Scenario* current_scenario_ = nullptr;
     
     // Random number generator
     std::mt19937& rng_;
+
+    // Renderer Interface Pointer
+    std::unique_ptr<IRenderer> renderer_;
     
-    /**
-     * Applies realistic acceleration and jerk limits to desired acceleration
-     * 
-     * @param desired_accel The desired acceleration vector
-     * @return Limited acceleration vector respecting physical constraints
-     */
+    // --- Private Methods --- 
+    Vec2 calculatePNGuidance(int step_count, const Vec2& target_acceleration_estimate);
+    void updateState(const Vec2& interceptor_cmd);
+    SimulationStatus checkSimulationStatus();
     Vec2 limitAcceleration(const Vec2& desired_accel);
-    
-    /**
-     * Performs 4th order Runge-Kutta integration for the interceptor's motion
-     * 
-     * RK4 provides significantly better accuracy than simple Euler integration
-     * by evaluating derivatives at multiple points.
-     * 
-     * @param accel Current acceleration
-     * @param pos Position vector to update
-     * @param vel Velocity vector to update
-     */
     void rk4Integration(const Vec2& accel, Vec2& pos, Vec2& vel);
+
+    // display() method is removed, handled by renderer now.
+    // initializeConsoleGrid() and drawConsolePlot() are removed.
+
+    /**
+     * @brief Helper to get a string representation of the current status.
+     */
+    std::string getStatusMessage() const;
 };
 
 #endif // MISSILE_INTERCEPTOR_HPP 

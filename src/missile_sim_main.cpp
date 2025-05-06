@@ -4,37 +4,60 @@
  */
 
 #include "missile_interceptor.hpp"
+#include "console_renderer.hpp"
+#include "null_renderer.hpp"
 #include <iostream>
 #include <random>
 #include <chrono>
 #include <thread>
 #include <string>
+#include <memory>
 
 int main(int argc, char* argv[]) {
     std::cout << "==== Missile Interceptor Scenario Testing ====" << std::endl;
     std::cout << "This test runs multiple interception scenarios using Proportional Navigation guidance" << std::endl;
     std::cout << "and RK4 integration physics." << std::endl << std::endl;
     
-    // Check for command line arguments
+    // Default settings
+    bool use_visualization = true; // Default to using a renderer
     bool run_all_scenarios = true;
     bool run_pursuit_only = false;
-    
+    int step_delay_ms = 50; // Default delay for visualization
+
+    // Check for command line arguments
     if (argc > 1) {
         std::string arg(argv[1]);
         if (arg == "--pursuit" || arg == "-p") {
             run_pursuit_only = true;
             run_all_scenarios = false;
             std::cout << "Running Pursuit scenario only" << std::endl;
+        } else if (arg == "--no-vis") {
+            use_visualization = false;
+            std::cout << "Visualization disabled." << std::endl;
+        } else if (arg == "--fast") {
+             use_visualization = true; // Keep visualization but remove delay
+             step_delay_ms = 0;
+             std::cout << "Running visualization without step delay." << std::endl;
         }
     }
     
-    // Initialize random number generator with seed
+    // Initialize random number generator
     std::random_device rd;
     std::mt19937 rng(rd());
     
     try {
-        // Create simulation instance
-        InterceptorSimulation sim(rng);
+        // Create the chosen Renderer
+        std::unique_ptr<IRenderer> renderer;
+        if (use_visualization) {
+            renderer = std::make_unique<ConsoleRenderer>();
+            std::cout << "Using Console Renderer." << std::endl;
+        } else {
+            renderer = std::make_unique<NullRenderer>();
+             std::cout << "Using Null Renderer (no visualization)." << std::endl;
+        }
+
+        // Create simulation instance, passing the renderer
+        InterceptorSimulation sim(rng, std::move(renderer));
         
         // Define scenarios
         HeadOnScenario scenario1;
@@ -42,7 +65,6 @@ int main(int argc, char* argv[]) {
         PursuitScenario scenario3;
         HighSpeedScenario scenario4;
         ManeuveringTargetScenario scenario5;
-        // New test scenarios
         SpiralManeuverScenario scenario6;
         LongRangeScenario scenario7;
         AcceleratingTargetScenario scenario8;
@@ -64,62 +86,52 @@ int main(int argc, char* argv[]) {
         // Run Pursuit scenario only if requested
         if (run_pursuit_only) {
             sim.loadScenario(&scenario3);
-            if (sim.run()) {
+            // Run with visualization ON for single scenario, respect step_delay
+            if (sim.run(true, step_delay_ms)) { 
                 successful_intercepts++;
             }
             total_scenarios = 1;
         }
         // Otherwise run all scenarios
         else if (run_all_scenarios) {
-            // Test scenarios
-            // Run original scenarios
+            // Run scenarios with visualization based on flag, respect delay
             sim.loadScenario(&scenario1);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
-            
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1)); // Pause between scenarios if visualizing
             
             sim.loadScenario(&scenario2);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
-            
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1));
             
             sim.loadScenario(&scenario3);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
-            
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1));
             
             sim.loadScenario(&scenario4);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
-            
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1));
             
             sim.loadScenario(&scenario5);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1));
             
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            
-            // Run new scenarios
             sim.loadScenario(&scenario6);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
-            
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1));
             
             sim.loadScenario(&scenario7);
-            if (sim.run()) successful_intercepts++;
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++;
             total_scenarios++;
+            if (use_visualization) std::this_thread::sleep_for(std::chrono::seconds(1));
             
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            
-            // Special handling for accelerating target scenario NO LONGER NEEDED HERE
-            // Acceleration is now estimated within the InterceptorSimulation::run loop
             sim.loadScenario(&scenario8);
-            if (sim.run()) successful_intercepts++; // Just run normally
+            if (sim.run(use_visualization, step_delay_ms)) successful_intercepts++; 
             total_scenarios++;
         }
         

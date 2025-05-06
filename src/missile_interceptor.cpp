@@ -9,19 +9,12 @@
 #include <iomanip>
 #include <thread>
 #include <chrono>
-
-// Vec2 implementation
-double Vec2::magnitude() const {
-    return std::sqrt(x*x + y*y);
-}
-
-void Vec2::normalize() {
-    double mag = magnitude();
-    if (mag > 1e-6) {
-        x /= mag;
-        y /= mag;
-    }
-}
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cstdlib>
+#include <sstream>   // For getStatusMessage formatting
+#include <memory>    // For std::move
 
 // HeadOnScenario implementation
 void HeadOnScenario::setup(Vec2& interceptor_pos, Vec2& interceptor_vel, 
@@ -237,7 +230,11 @@ std::string AcceleratingTargetScenario::getName() const {
 }
 
 // InterceptorSimulation implementation
-InterceptorSimulation::InterceptorSimulation(std::mt19937& rng) : rng_(rng), current_scenario_(nullptr) {
+InterceptorSimulation::InterceptorSimulation(std::mt19937& rng, std::unique_ptr<IRenderer> renderer) 
+    : rng_(rng), 
+      renderer_(std::move(renderer)), // Store the passed renderer
+      current_scenario_(nullptr) // Initialize scenario pointer
+{
     // Initialize simulation parameters
     time_step_ = 0.1; // seconds
     max_interceptor_accel_ = 50.0; // units/s^2
@@ -254,6 +251,23 @@ InterceptorSimulation::InterceptorSimulation(std::mt19937& rng) : rng_(rng), cur
     
     // Initialize acceleration
     interceptor_accel_ = {0.0, 0.0};
+    previous_target_vel_ = {0.0, 0.0}; // Initialize from APN
+    current_status_ = SimulationStatus::Active; // Start as active
+
+    // Initialize the renderer
+    if (renderer_) {
+        renderer_->initialize();
+    } else {
+        // Handle error or default to NullRenderer if necessary? For now, assume valid renderer passed.
+        std::cerr << "Warning: No renderer provided to InterceptorSimulation!" << std::endl;
+    }
+}
+
+// Destructor: Shutdown the renderer
+InterceptorSimulation::~InterceptorSimulation() {
+    if (renderer_) {
+        renderer_->shutdown();
+    }
 }
 
 void InterceptorSimulation::loadScenario(Scenario* scenario) {
@@ -281,98 +295,88 @@ void InterceptorSimulation::loadScenario(Scenario* scenario) {
     }
 }
 
-bool InterceptorSimulation::run(bool visualize) {
+bool InterceptorSimulation::run(bool use_visualization, int step_delay_ms) {
     if (!current_scenario_) {
         std::cerr << "Error: No scenario loaded!" << std::endl;
         return false;
     }
     
-    bool simulation_active = true;
     int step_count = 0;
-    const int max_steps = 1000; // Safety limit
-    bool intercept_success = false;
+    const int max_steps = 1000; // Safety limit from original run loop
     
-    while (simulation_active && step_count < max_steps) {
+    current_status_ = SimulationStatus::Active; // Ensure status is Active at start
+
+    while (current_status_ == SimulationStatus::Active && step_count < max_steps) {
         
-        // --- Target Acceleration Estimation --- 
         Vec2 target_acceleration_estimate = {0.0, 0.0};
-        if (step_count > 0) {
+        if (step_count > 0 && time_step_ > 1e-6) { // Avoid division by zero
             target_acceleration_estimate.x = (target_vel_.x - previous_target_vel_.x) / time_step_;
             target_acceleration_estimate.y = (target_vel_.y - previous_target_vel_.y) / time_step_;
         }
-        // Store current target velocity for next step's calculation
-        // IMPORTANT: Do this *before* target_vel_ might be modified by scenario logic below
         Vec2 current_target_vel_for_next_step = target_vel_;
-        // --- End Estimation --- 
         
-        // Calculate desired acceleration using PN guidance (now passing estimate and step count)
         Vec2 accel_cmd = calculatePNGuidance(step_count, target_acceleration_estimate);
-        
-        // Update positions and velocities (interceptor and target position)
         updateState(accel_cmd);
         
-        // --- Special Scenario Logic (Example: Accelerating Target) ---
-        // Note: This happens *after* the state update and *after* current velocity was saved for next estimate
         if (current_scenario_ && current_scenario_->getName() == "Accelerating Target") {
-             if (step_count % 5 == 0 && step_count < 30) { // Example logic from main
+             if (step_count % 5 == 0 && step_count < 30) { 
                  Vec2 target_vel_dir = target_vel_;
                  double speed = target_vel_dir.magnitude();
-                 if (speed > 1e-6) { // Avoid division by zero
-                    target_vel_dir.x /= speed;
-                    target_vel_dir.y /= speed;
-                    speed += 2.0; // Increase speed
-                    target_vel_.x = target_vel_dir.x * speed;
-                    target_vel_.y = target_vel_dir.y * speed;
-                 }
-                 // Need to inform the user or log this change if visualize is false
-                 if (visualize) {
-                    std::cout << "Target accelerated to speed: " << speed << std::endl;
+                 if (speed > 1e-6) { 
+                    target_vel_dir.normalize(); // Use normalize method
+                    speed += 2.0; 
+                    target_vel_ = {target_vel_dir.x * speed, target_vel_dir.y * speed};
                  }
              }
         }
-        // --- End Special Scenario Logic --- 
-
-        // Update previous target velocity for the *next* iteration's estimate calculation
         previous_target_vel_ = current_target_vel_for_next_step;
         
-        // Display current state (conditionally)
-        if (visualize) {
-            display(step_count);
+        current_status_ = checkSimulationStatus(); // Update status
+
+        if (use_visualization && renderer_) {
+            // Populate RenderData struct
+            RenderData frame_data;
+            frame_data.interceptor_pos = interceptor_pos_;
+            frame_data.target_pos = target_pos_;
+            frame_data.target_destination = target_destination_;
+            frame_data.is_intercepted = (current_status_ == SimulationStatus::Interception);
+            frame_data.status_message = getStatusMessage();
+            frame_data.current_step = step_count;
+            frame_data.scenario_name = current_scenario_->getName();
             
-            // Simple delay for visualization
-            for (volatile long i = 0; i < 10000000; i++) {
-                // Empty loop to create delay without thread library
+            // Render the frame
+            renderer_->renderFrame(frame_data, world_bound_x_, world_bound_y_);
+            renderer_->presentFrame();
+
+            // Apply delay if specified
+            if (step_delay_ms > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(step_delay_ms));
             }
         }
-        
-        // Check simulation status
-        SimulationStatus status = checkSimulationStatus();
-        simulation_active = (status == SimulationStatus::Active);
-        intercept_success = (status == SimulationStatus::Interception);
         
         step_count++;
     }
     
-    if (step_count >= max_steps) {
-        std::cout << "Simulation reached step limit." << std::endl;
+    if (step_count >= max_steps && current_status_ == SimulationStatus::Active) {
+        std::cout << "Simulation reached step limit while still active." << std::endl;
+    }
+
+    // Final display if not console plotting or if it wasn't the last thing shown
+    if (!use_visualization && current_status_ != SimulationStatus::Active) {
+        // If console plot wasn't used, and sim ended, redraw one last time to show final state
+        RenderData final_data;
+        final_data.interceptor_pos = interceptor_pos_;
+        final_data.target_pos = target_pos_;
+        final_data.target_destination = target_destination_;
+        final_data.is_intercepted = (current_status_ == SimulationStatus::Interception);
+        final_data.status_message = getStatusMessage();
+        final_data.current_step = step_count;
+        final_data.scenario_name = current_scenario_->getName();
+        renderer_->renderFrame(final_data, world_bound_x_, world_bound_y_);
+        renderer_->presentFrame();
     }
     
-    return intercept_success;
-}
-
-void InterceptorSimulation::display(int step) {
-    std::cout << "\n--- Step " << step << " ---" << std::endl;
-    std::cout << "Target:      Position [" << std::fixed << std::setprecision(2) << target_pos_.x << ", " 
-              << target_pos_.y << "], Velocity [" << target_vel_.x << ", " << target_vel_.y << "]" << std::endl;
-    std::cout << "Interceptor: Position [" << interceptor_pos_.x << ", " << interceptor_pos_.y 
-              << "], Velocity [" << interceptor_vel_.x << ", " << interceptor_vel_.y 
-              << "], Accel [" << interceptor_accel_.x << ", " << interceptor_accel_.y << "]" << std::endl;
-    
-    // Calculate and display distance between target and interceptor
-    double dx = target_pos_.x - interceptor_pos_.x;
-    double dy = target_pos_.y - interceptor_pos_.y;
-    double distance = std::sqrt(dx*dx + dy*dy);
-    std::cout << "Distance: " << distance << " (Intercept radius: " << intercept_radius_ << ")" << std::endl;
+    return (current_status_ == SimulationStatus::Interception);
 }
 
 void InterceptorSimulation::updateState(const Vec2& interceptor_cmd) {
@@ -401,14 +405,12 @@ InterceptorSimulation::SimulationStatus InterceptorSimulation::checkSimulationSt
     double distance_squared = dx*dx + dy*dy;
     
     if (distance_squared <= intercept_radius_ * intercept_radius_) {
-        std::cout << "\n*** INTERCEPTION SUCCESSFUL! ***" << std::endl;
         return SimulationStatus::Interception;
     }
     
     // Check if target is out of bounds (missed)
     if (target_pos_.x < 0 || target_pos_.x > world_bound_x_ || 
         target_pos_.y < 0 || target_pos_.y > world_bound_y_) {
-        std::cout << "\n*** TARGET ESCAPED! ***" << std::endl;
         return SimulationStatus::TargetEscaped;
     }
     
@@ -418,7 +420,6 @@ InterceptorSimulation::SimulationStatus InterceptorSimulation::checkSimulationSt
     double target_distance_squared = target_dx*target_dx + target_dy*target_dy;
     
     if (target_distance_squared <= 2.0 * 2.0) { // Using 2.0 as target hit radius
-        std::cout << "\n*** TARGET REACHED DESTINATION! DEFENCE FAILED! ***" << std::endl;
         return SimulationStatus::TargetReachedDestination;
     }
     
@@ -529,24 +530,6 @@ Vec2 InterceptorSimulation::calculatePNGuidance(int step_count, const Vec2& targ
     pn_accel.x = -total_accel_magnitude * los_unit.y;
     pn_accel.y = total_accel_magnitude * los_unit.x;
     
-    // --- APN Debug Logging --- 
-    if (is_spiral_scenario) {
-       std::cout << std::fixed << std::setprecision(4); // For formatted output
-       std::cout << "--- Step " << step_count << " APN Debug ---\n";
-       std::cout << "  TargetAccelEst:  [ " << target_acceleration_estimate.x << ", " << target_acceleration_estimate.y << " ] (Mag: " << target_acceleration_estimate.magnitude() << ")\n";
-       std::cout << "  LOS Unit:        [ " << los_unit.x << ", " << los_unit.y << " ]\n";
-       std::cout << "  TgtAccelPerpMag:  " << target_accel_perp_magnitude << " (Signed: " << signed_target_accel_perp << ")\n";
-       std::cout << "  AdjustNavConst:   " << adjusted_nav_constant << " (Base: " << scenario_nav_constant_base << ", Scale: " << scenario_nav_constant_scale << ")\n";
-       std::cout << "  LOS Rate:         " << los_rate << "\n";
-       std::cout << "  Closing V:        " << closing_velocity << "\n";
-       std::cout << "  Time To Go:       " << time_to_go << "\n";
-       std::cout << "  PN Mag Term:      " << pn_accel_magnitude << "\n";
-       std::cout << "  APN Corr Term:    " << apn_correction_term << "\n";
-       std::cout << "  Total Accel Mag:  " << total_accel_magnitude << "\n";
-       std::cout << "  Final Accel Cmd: [ " << pn_accel.x << ", " << pn_accel.y << " ]\n";
-    }
-    // --- End APN Debug Logging ---
-    
     return pn_accel;
 }
 
@@ -644,4 +627,14 @@ void InterceptorSimulation::rk4Integration(const Vec2& accel, Vec2& pos, Vec2& v
     // Update position using weighted average of k values
     pos.x += (k1_p.x + 2.0 * k2_p.x + 2.0 * k3_p.x + k4_p.x) * time_step_ / 6.0;
     pos.y += (k1_p.y + 2.0 * k2_p.y + 2.0 * k3_p.y + k4_p.y) * time_step_ / 6.0;
+}
+
+std::string InterceptorSimulation::getStatusMessage() const {
+    switch(current_status_) {
+        case SimulationStatus::Active: return "Active";
+        case SimulationStatus::Interception: return "INTERCEPTED!";
+        case SimulationStatus::TargetEscaped: return "Target Escaped";
+        case SimulationStatus::TargetReachedDestination: return "Target Reached Dest.";
+        default: return "Unknown";
+    }
 } 
